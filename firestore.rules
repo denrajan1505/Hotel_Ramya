@@ -1,0 +1,127 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isActive() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && role() == 'Administrator';
+    }
+
+    function isCreditOfficer() {
+      return isSignedIn() && role() == 'Credit Control Officer';
+    }
+
+    function isAccounts() {
+      return isSignedIn() && role() == 'Accounts Department';
+    }
+
+    function isManagement() {
+      return isSignedIn() && role() == 'Management';
+    }
+
+    function canOperate() {
+      return isSignedIn() && isActive() && (isAdmin() || isCreditOfficer() || isAccounts());
+    }
+
+    // Every authenticated + active user can read operational/reporting data.
+    function canRead() {
+      return isSignedIn() && isActive();
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // User docs are created/edited via Cloud Functions (Admin SDK) so a
+      // brand-new admin session is never hijacked mid-creation. Direct client
+      // writes are limited to an admin editing non-security fields.
+      allow update: if isAdmin() && !('role' in request.resource.data.diff(resource.data).affectedKeys());
+      allow create, delete: if false;
+    }
+
+    match /customerMaster/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer();
+      allow delete: if isAdmin();
+    }
+
+    match /creditAccounts/{id} {
+      allow read: if canRead();
+      allow write: if isAdmin();
+    }
+
+    match /invoices/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /paymentAllocations/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /receipts/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /receiptAllocations/{id} {
+      allow read: if canRead();
+      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /adjustments/{id} {
+      allow read: if canRead();
+      allow create: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow update: if isAdmin() || isAccounts();
+      allow delete: if isAdmin();
+    }
+
+    match /departments/{id} {
+      allow read: if canRead();
+      allow write: if isAdmin();
+    }
+
+    match /counters/{id} {
+      allow read: if canRead();
+      allow write: if canOperate();
+    }
+
+    match /auditLogs/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /notifications/{id} {
+      allow read, update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /settings/{id} {
+      allow read: if canRead();
+      allow write: if isAdmin();
+    }
+  }
+}

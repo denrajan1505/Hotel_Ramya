@@ -1,0 +1,193 @@
+import { useState, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import toast from 'react-hot-toast';
+import PageHeader from '../../components/common/PageHeader';
+import DataTable from '../../components/common/DataTable';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
+import Loader from '../../components/common/Loader';
+import { parseFoCashierFile, findExistingBusinessDates, commitFoCashierImport } from '../../services/importService';
+import { listCustomers } from '../../services/customerService';
+import { useAuth } from '../../context/AuthContext';
+import { formatCurrency, formatDate } from '../../utils/formatters';
+
+export default function ImportFOCashier() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef(null);
+
+  const [parsing, setParsing] = useState(false);
+  const [parsed, setParsed] = useState(null);
+  const [existingDates, setExistingDates] = useState([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const { data: customers } = useQuery({ queryKey: ['customers'], queryFn: listCustomers });
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setResult(null);
+    setParsed(null);
+    setParsing(true);
+    try {
+      const parsedResult = await parseFoCashierFile(file);
+      setParsed(parsedResult);
+      if (parsedResult.validation.valid && parsedResult.businessDates.length) {
+        const dupes = await findExistingBusinessDates(parsedResult.businessDates);
+        setExistingDates(dupes);
+      } else {
+        setExistingDates([]);
+      }
+    } catch (err) {
+      toast.error(`Failed to read file: ${err.message}`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const startImport = () => {
+    if (existingDates.length > 0) {
+      setConfirmOpen(true);
+    } else {
+      runImport([]);
+    }
+  };
+
+  const runImport = async (replaceDates) => {
+    setConfirmOpen(false);
+    setImporting(true);
+    try {
+      const res = await commitFoCashierImport({
+        included: parsed.included,
+        customerMasterList: customers || [],
+        replaceDates,
+        user,
+      });
+      setResult(res);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      toast.success(`Imported ${res.imported} invoices`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader title="Import FO Cashier Report" subtitle="Bulk-import genuine credit invoices from the Front Office Cashier Report (.xls / .xlsx)" />
+
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          handleFile(e.dataTransfer.files?.[0]);
+        }}
+        className="glass-card flex flex-col items-center justify-center gap-3 border-2 border-dashed border-primary-200 p-10 text-center dark:border-primary-500/30"
+      >
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 text-primary-600 dark:bg-primary-500/10">
+          <UploadCloud size={28} />
+        </div>
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Drag & drop the FO Cashier Report here</p>
+        <p className="text-xs text-slate-400">or</p>
+        <button onClick={() => fileInputRef.current?.click()} className="btn-primary">
+          <FileSpreadsheet size={16} /> Select Excel File
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xls,.xlsx"
+          hidden
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+      </div>
+
+      {parsing && <Loader label="Reading and validating file…" className="mt-6" />}
+
+      {parsed && !parsing && (
+        <div className="mt-6 space-y-4">
+          {!parsed.validation.valid ? (
+            <div className="glass-card flex items-start gap-3 border border-danger-200 p-5 dark:border-danger-500/30">
+              <XCircle className="mt-0.5 shrink-0 text-danger-500" size={20} />
+              <div>
+                <p className="font-semibold text-danger-600">Missing mandatory columns</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Could not find: {parsed.validation.missing.join(', ')}. Check the sheet headers and re-upload.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="glass-card p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">Rows to Import</p>
+                  <p className="mt-1 text-2xl font-bold text-success-600">{parsed.included.length}</p>
+                </div>
+                <div className="glass-card p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">Excluded (Cash/Comp/Cancelled/Void)</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-400">{parsed.excluded.length}</p>
+                </div>
+                <div className="glass-card p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">Business Dates</p>
+                  <p className="mt-1 text-2xl font-bold text-primary-600">{parsed.businessDates.length}</p>
+                </div>
+              </div>
+
+              {existingDates.length > 0 && (
+                <div className="glass-card flex items-start gap-3 border border-warning-200 p-4 dark:border-warning-500/30">
+                  <AlertTriangle className="mt-0.5 shrink-0 text-warning-500" size={18} />
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    Business date(s) already imported: <strong>{existingDates.join(', ')}</strong>. Importing will ask to replace existing invoices for those dates.
+                  </p>
+                </div>
+              )}
+
+              <DataTable
+                exportable={false}
+                rows={parsed.included}
+                emptyLabel="No importable rows found."
+                columns={[
+                  { key: 'businessDate', header: 'Business Date', render: (r) => formatDate(r.businessDate) },
+                  { key: 'billNumber', header: 'Bill No' },
+                  { key: 'guestName', header: 'Guest' },
+                  { key: 'companyName', header: 'Company' },
+                  { key: 'roomNumber', header: 'Room' },
+                  { key: 'billAmount', header: 'Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) },
+                  { key: 'department', header: 'Department' },
+                ]}
+              />
+
+              <div className="flex justify-end">
+                <button onClick={startImport} disabled={importing} className="btn-gold">
+                  <CheckCircle2 size={16} /> {importing ? 'Importing…' : `Import ${parsed.included.length} Invoices`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {result && (
+        <div className="glass-card mt-6 flex items-center gap-3 border border-success-200 p-4 dark:border-success-500/30">
+          <CheckCircle2 className="text-success-500" size={20} />
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Successfully imported <strong>{result.imported}</strong> invoices.
+          </p>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={() => runImport(existingDates)}
+        title="Replace existing invoices?"
+        message={`Business date(s) ${existingDates.join(', ')} already have imported invoices. Continuing will delete and replace those invoices with the new file's data.`}
+        confirmLabel="Replace & Import"
+        danger
+        loading={importing}
+      />
+    </div>
+  );
+}
