@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Hotel, Eye, EyeOff, LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
+import logo from '../../assets/logo.png';
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -42,10 +43,8 @@ export default function Login() {
 
       <div className="relative z-10 w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-gold-400 to-gold-500 text-primary-950 shadow-lg">
-            <Hotel size={30} />
-          </div>
-          <h1 className="mt-4 text-2xl font-bold text-white">Hotel Ramyas</h1>
+          <img src={logo} alt="Ramyas Hotels" className="h-28 w-28 object-contain drop-shadow-lg" />
+          <h1 className="mt-2 text-2xl font-bold text-white">Hotel Ramyas</h1>
           <p className="text-sm text-primary-200">Credit Control Management System</p>
         </div>
 
