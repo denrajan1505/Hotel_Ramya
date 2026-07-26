@@ -30,21 +30,48 @@ const MANDATORY_FIELDS = ['businessDate', 'billNumber', 'billAmount'];
 const EXCLUDED_STATUS_KEYWORDS = ['cash', 'complimentary', 'comp bill', 'cancel', 'void'];
 
 function normalizeHeader(header) {
-  return String(header).toLowerCase().trim();
+  return String(header ?? '').toLowerCase().trim();
 }
 
-function buildHeaderMap(sampleRow) {
-  const rawHeaders = Object.keys(sampleRow);
-  const map = {};
-  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-    const found = rawHeaders.find((h) => aliases.includes(normalizeHeader(h)));
-    if (found) map[field] = found;
+// PMS exports commonly prepend title/date-range rows above the real header
+// row, so scan the first few rows and pick whichever one actually matches
+// the most known column aliases instead of assuming row 0 is the header.
+function findHeaderRowIndex(rows) {
+  const maxScan = Math.min(rows.length, 20);
+  let bestIndex = 0;
+  let bestScore = -1;
+  for (let i = 0; i < maxScan; i += 1) {
+    const row = rows[i];
+    if (!row || !row.length) continue;
+    let score = 0;
+    for (const cell of row) {
+      const norm = normalizeHeader(cell);
+      if (!norm) continue;
+      if (Object.values(HEADER_ALIASES).some((aliases) => aliases.includes(norm))) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
   }
+  return bestIndex;
+}
+
+// Maps each canonical field to the column index it was found at in the header row.
+function buildHeaderMap(headerRow) {
+  const map = {};
+  headerRow.forEach((cell, index) => {
+    const norm = normalizeHeader(cell);
+    if (!norm) return;
+    for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+      if (map[field] === undefined && aliases.includes(norm)) map[field] = index;
+    }
+  });
   return map;
 }
 
 export function validateHeaderMap(headerMap) {
-  const missing = MANDATORY_FIELDS.filter((f) => !headerMap[f]);
+  const missing = MANDATORY_FIELDS.filter((f) => headerMap[f] === undefined);
   return { valid: missing.length === 0, missing };
 }
 
@@ -66,7 +93,8 @@ export async function parseFoCashierFile(file) {
     return { headerMap: {}, validation: { valid: false, missing: MANDATORY_FIELDS }, businessDates: [], included: [], excluded: [] };
   }
 
-  const headerMap = buildHeaderMap(rows[0]);
+  const headerRowIndex = findHeaderRowIndex(rows);
+  const headerMap = buildHeaderMap(rows[headerRowIndex] || []);
   const validation = validateHeaderMap(headerMap);
   if (!validation.valid) {
     return { headerMap, validation, businessDates: [], included: [], excluded: [] };
@@ -76,7 +104,8 @@ export async function parseFoCashierFile(file) {
   const excluded = [];
   const businessDateSet = new Set();
 
-  for (const row of rows) {
+  for (const row of rows.slice(headerRowIndex + 1)) {
+    if (!row || row.every((cell) => cell === '' || cell == null)) continue;
     const billStatus = row[headerMap.billStatus] || '';
     const normalized = {
       businessDate: excelSerialOrDate(row[headerMap.businessDate]),
