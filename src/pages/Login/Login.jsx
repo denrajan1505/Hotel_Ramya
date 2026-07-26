@@ -43,9 +43,8 @@ export default function Login() {
 
       <div className="relative z-10 w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
-          <img src={logo} alt="Ramyas Hotels" className="h-28 w-28 object-contain drop-shadow-lg" />
-          <h1 className="mt-2 text-2xl font-bold text-white">Hotel Ramyas</h1>
-          <p className="text-sm text-primary-200">Credit Control Management System</p>
+          <img src={logo} alt="Trichy Ramyas Hotels Pvt Ltd" className="w-full max-w-sm object-contain drop-shadow-lg" />
+          <p className="mt-1 text-sm text-primary-200">Credit Control Management System</p>
         </div>
 
         <div className="glass-card !bg-white/95 p-7 dark:!bg-primary-900/90">
