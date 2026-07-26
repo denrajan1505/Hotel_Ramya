@@ -42,9 +42,9 @@ export default function Login() {
       <div className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-primary-400/20 blur-3xl" />
 
       <div className="relative z-10 w-full max-w-md">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <img src={logo} alt="Trichy Ramyas Hotels Pvt Ltd" className="w-full max-w-sm object-contain drop-shadow-lg" />
-          <p className="mt-1 text-sm text-primary-200">Credit Control Management System</p>
+        <div className="mb-2 flex flex-col items-center text-center">
+          <img src={logo} alt="Trichy Ramyas Hotels Pvt Ltd" className="-mb-12 w-full max-w-sm object-contain drop-shadow-lg" />
+          <p className="text-sm text-primary-200">Credit Control Management System</p>
         </div>
 
         <div className="glass-card !bg-white/95 p-7 dark:!bg-primary-900/90">
