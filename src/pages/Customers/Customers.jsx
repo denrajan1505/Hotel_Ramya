@@ -62,6 +62,12 @@ export default function Customers() {
   });
 
   const canManage = can('MANAGE_CUSTOMERS');
+  // Setting the initial limit on a brand-new customer is part of creating
+  // the customer; changing an EXISTING limit is "manage credit limits" —
+  // Administrator only, per spec (and enforced server-side by Firestore
+  // rules on creditAccounts — this just keeps the UI from offering an edit
+  // that would be rejected).
+  const canEditCreditLimit = !editing || can('MANAGE_CREDIT_LIMITS');
 
   return (
     <div>
@@ -125,11 +131,21 @@ export default function Customers() {
           </div>
           <div>
             <label className="label">Credit Limit (₹)</label>
-            <input type="number" step="0.01" className="input" {...register('creditLimit')} />
+            {canEditCreditLimit ? (
+              <input type="number" step="0.01" className="input" {...register('creditLimit')} />
+            ) : (
+              <p className="input !bg-slate-50 !text-slate-400 dark:!bg-white/5">
+                {formatCurrency(editing?.creditLimit)} <span className="text-xs">(Administrator only)</span>
+              </p>
+            )}
           </div>
           <div>
             <label className="label">Credit Days</label>
-            <input type="number" className="input" {...register('creditDays')} />
+            {canEditCreditLimit ? (
+              <input type="number" className="input" {...register('creditDays')} />
+            ) : (
+              <p className="input !bg-slate-50 !text-slate-400 dark:!bg-white/5">{editing?.creditDays} days (Administrator only)</p>
+            )}
           </div>
           <div>
             <label className="label">Contact Person</label>

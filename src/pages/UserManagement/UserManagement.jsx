@@ -1,17 +1,20 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { Plus, KeyRound, Power } from 'lucide-react';
+import { Plus, MailCheck, Power } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
 import Modal from '../../components/common/Modal';
 import StatusBadge from '../../components/common/StatusBadge';
-import { listUsers, createUser, resetUserPassword, setUserRole, setUserActive } from '../../services/userService';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
+import { listUsers, createUser, sendPasswordReset, setUserRole, setUserActive } from '../../services/userService';
 import { ALL_ROLES } from '../../constants/roles';
+import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatters';
 
 export default function UserManagement() {
+  const { user: adminUser } = useAuth();
   const queryClient = useQueryClient();
   const { data: users, isLoading } = useQuery({ queryKey: ['users'], queryFn: listUsers });
   const [createOpen, setCreateOpen] = useState(false);
@@ -21,7 +24,7 @@ export default function UserManagement() {
 
   const handleRoleChange = async (uid, role) => {
     try {
-      await setUserRole(uid, role);
+      await setUserRole(uid, role, adminUser);
       toast.success('Role updated');
       refresh();
     } catch (err) {
@@ -31,9 +34,19 @@ export default function UserManagement() {
 
   const handleToggleActive = async (row) => {
     try {
-      await setUserActive(row.id, !row.active);
+      await setUserActive(row.id, !row.active, adminUser);
       toast.success(row.active ? 'User disabled' : 'User enabled');
       refresh();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleSendReset = async () => {
+    try {
+      await sendPasswordReset(resetTarget.email, adminUser);
+      toast.success(`Password reset email sent to ${resetTarget.email}`);
+      setResetTarget(null);
     } catch (err) {
       toast.error(err.message);
     }
@@ -58,6 +71,7 @@ export default function UserManagement() {
         columns={[
           { key: 'username', header: 'Username' },
           { key: 'displayName', header: 'Display Name' },
+          { key: 'email', header: 'Email' },
           {
             key: 'role',
             header: 'Role',
@@ -79,8 +93,8 @@ export default function UserManagement() {
             sortable: false,
             render: (r) => (
               <div className="flex justify-end gap-2">
-                <button onClick={() => setResetTarget(r)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-primary-600 dark:hover:bg-white/10" title="Reset Password">
-                  <KeyRound size={15} />
+                <button onClick={() => setResetTarget(r)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-primary-600 dark:hover:bg-white/10" title="Send Password Reset Email">
+                  <MailCheck size={15} />
                 </button>
                 <button
                   onClick={() => handleToggleActive(r)}
@@ -95,20 +109,28 @@ export default function UserManagement() {
         ]}
       />
 
-      <CreateUserModal open={createOpen} onClose={() => setCreateOpen(false)} onDone={refresh} />
-      <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />
+      <CreateUserModal open={createOpen} onClose={() => setCreateOpen(false)} onDone={refresh} adminUser={adminUser} />
+
+      <ConfirmDialog
+        open={Boolean(resetTarget)}
+        onClose={() => setResetTarget(null)}
+        onConfirm={handleSendReset}
+        title="Send Password Reset Email"
+        message={`Firebase will email a password reset link to ${resetTarget?.email}. There's no way to set another user's password directly without a paid backend — this is the secure free-plan equivalent.`}
+        confirmLabel="Send Email"
+      />
     </div>
   );
 }
 
-function CreateUserModal({ open, onClose, onDone }) {
+function CreateUserModal({ open, onClose, onDone, adminUser }) {
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (data) => {
     setSubmitting(true);
     try {
-      await createUser(data);
+      await createUser(data, adminUser);
       toast.success('User created');
       reset();
       onClose();
@@ -133,6 +155,12 @@ function CreateUserModal({ open, onClose, onDone }) {
           <input className="input" {...register('displayName', { required: true })} />
         </div>
         <div>
+          <label className="label">Real Email Address *</label>
+          <input type="email" className="input" {...register('email', { required: true })} />
+          {errors.email && <p className="mt-1 text-xs text-danger-500">Required — used to send password reset links</p>}
+          <p className="mt-1 text-xs text-slate-400">Login still uses the username above; this email is only for password recovery.</p>
+        </div>
+        <div>
           <label className="label">Temporary Password *</label>
           <input type="password" className="input" {...register('password', { required: true, minLength: 6 })} />
           {errors.password && <p className="mt-1 text-xs text-danger-500">Minimum 6 characters</p>}
@@ -153,47 +181,6 @@ function CreateUserModal({ open, onClose, onDone }) {
           </button>
           <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? 'Creating…' : 'Create User'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function ResetPasswordModal({ user, onClose }) {
-  const { register, handleSubmit, reset, formState: { errors } } = useForm();
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async (data) => {
-    setSubmitting(true);
-    try {
-      await resetUserPassword(user.id, data.newPassword);
-      toast.success(`Password reset for ${user.username}`);
-      reset();
-      onClose();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (!user) return null;
-
-  return (
-    <Modal open={Boolean(user)} onClose={onClose} title={`Reset Password — ${user.username}`} size="sm">
-      <form onSubmit={handleSubmit(submit)} className="space-y-4">
-        <div>
-          <label className="label">New Password *</label>
-          <input type="password" className="input" {...register('newPassword', { required: true, minLength: 6 })} />
-          {errors.newPassword && <p className="mt-1 text-xs text-danger-500">Minimum 6 characters</p>}
-        </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="btn-outline">
-            Cancel
-          </button>
-          <button type="submit" disabled={submitting} className="btn-primary">
-            {submitting ? 'Resetting…' : 'Reset Password'}
           </button>
         </div>
       </form>

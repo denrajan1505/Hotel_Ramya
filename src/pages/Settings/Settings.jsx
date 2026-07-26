@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, DatabaseBackup, Sparkles } from 'lucide-react';
+import { Plus, Trash2, DatabaseBackup, Sparkles, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/common/PageHeader';
 import { listDepartments, createDepartment, deleteDepartment } from '../../services/departmentService';
-import { seedCustomersIfEmpty } from '../../services/customerService';
+import { seedCustomersIfEmpty, recalculateCreditAccountBalances } from '../../services/customerService';
 import { downloadFullBackup } from '../../services/backupService';
 import { useAuth } from '../../context/AuthContext';
 
@@ -33,6 +33,21 @@ export default function Settings() {
       await seedCustomersIfEmpty();
       toast.success('Seeded known portals/travel agencies into Customer Master (skipped if not empty)');
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRecalculate = async () => {
+    setBusy(true);
+    try {
+      const { accountsUpdated } = await recalculateCreditAccountBalances(user);
+      toast.success(`Recalculated ${accountsUpdated} credit account balance(s) from invoices`);
+      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-top-outstanding'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    } catch (err) {
+      toast.error(err.message);
     } finally {
       setBusy(false);
     }
@@ -86,6 +101,19 @@ export default function Settings() {
             </p>
             <button onClick={handleSeed} disabled={busy} className="btn-gold">
               <Sparkles size={15} /> Seed Known Portals & Travels
+            </button>
+          </div>
+        )}
+
+        {can('MANAGE_CREDIT_LIMITS') && (
+          <div className="glass-card p-5">
+            <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Credit Account Reconciliation</h3>
+            <p className="mb-4 text-xs text-slate-400">
+              Credit account balances update automatically with every payment, receipt, adjustment and import. Use this to re-sum every customer's
+              balance from their invoices from scratch — a safety net if anything ever looks out of sync.
+            </p>
+            <button onClick={handleRecalculate} disabled={busy} className="btn-outline">
+              <RefreshCw size={15} /> {busy ? 'Recalculating…' : 'Recalculate All Balances'}
             </button>
           </div>
         )}

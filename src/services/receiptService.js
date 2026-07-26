@@ -1,4 +1,4 @@
-import { doc, collection, getDocs, getDoc, query, where, orderBy, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { doc, collection, getDocs, getDoc, query, where, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
@@ -57,6 +57,8 @@ export async function cancelReceipt(receiptId, user) {
     const invoiceSnaps = [];
     for (const ref of invoiceRefs) invoiceSnaps.push(await tx.get(ref));
 
+    let creditAccountDelta = 0;
+
     invoiceSnaps.forEach((snap, idx) => {
       if (!snap.exists()) return;
       const inv = snap.data();
@@ -73,6 +75,7 @@ export async function cancelReceipt(receiptId, user) {
         commission: newCommission,
       });
       const status = deriveInvoiceStatus(outstanding, inv.billAmount, inv.dueDate);
+      creditAccountDelta += outstanding - Number(inv.outstanding || 0);
       tx.update(invoiceRefs[idx], {
         received: newReceived,
         tds: newTds,
@@ -82,6 +85,14 @@ export async function cancelReceipt(receiptId, user) {
         status,
       });
     });
+
+    if (receipt.customerId && creditAccountDelta !== 0) {
+      tx.set(
+        doc(db, COLLECTIONS.CREDIT_ACCOUNTS, receipt.customerId),
+        { currentOutstanding: increment(round2(creditAccountDelta)) },
+        { merge: true },
+      );
+    }
 
     tx.update(receiptRef, { status: 'Cancelled', cancelledAt: serverTimestamp(), cancelledBy: user?.uid || null });
     if (paymentSnap.exists()) {

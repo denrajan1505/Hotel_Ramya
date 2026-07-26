@@ -1,6 +1,7 @@
 // Firestore collection names, centralized so schema changes happen in one place.
 export const COLLECTIONS = {
   USERS: 'users',
+  USERNAMES: 'usernames',
   CUSTOMER_MASTER: 'customerMaster',
   CREDIT_ACCOUNTS: 'creditAccounts',
   INVOICES: 'invoices',

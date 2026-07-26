@@ -1,4 +1,4 @@
-import { doc, collection, runTransaction, serverTimestamp, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { doc, collection, runTransaction, serverTimestamp, increment, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
@@ -130,6 +130,8 @@ export async function recordPaymentWithReceipt({
     });
     tx.update(paymentRef, { receiptId: receiptRef.id });
 
+    let creditAccountDelta = 0;
+
     invoiceSnaps.forEach((snap, idx) => {
       const inv = snap.data();
       const amt = round2(allocations[idx].amountAdjusted);
@@ -145,6 +147,7 @@ export async function recordPaymentWithReceipt({
         commission: newCommission,
       });
       const status = deriveInvoiceStatus(outstanding, inv.billAmount, inv.dueDate);
+      creditAccountDelta += outstanding - Number(inv.outstanding || 0);
 
       tx.update(invoiceRefs[idx], {
         received: newReceived,
@@ -176,6 +179,14 @@ export async function recordPaymentWithReceipt({
         createdAt: serverTimestamp(),
       });
     });
+
+    // Client-side replacement for the old onInvoiceWriteUpdateCreditAccount
+    // Cloud Functions trigger: apply the net outstanding change to the
+    // customer's credit account in the same transaction. increment() is
+    // conflict-safe without needing a prior read (see customerService.js).
+    if (customerId && creditAccountDelta !== 0) {
+      tx.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, customerId), { currentOutstanding: increment(round2(creditAccountDelta)) }, { merge: true });
+    }
 
     return { receiptId: receiptRef.id, receiptNumber };
   });
@@ -237,6 +248,8 @@ export async function allocatePaymentToInvoices({ paymentId, allocations, user }
       updatedAt: serverTimestamp(),
     });
 
+    let creditAccountDelta = 0;
+
     invoiceSnaps.forEach((snap, idx) => {
       const inv = snap.data();
       const amt = round2(allocations[idx].amountAdjusted);
@@ -252,6 +265,7 @@ export async function allocatePaymentToInvoices({ paymentId, allocations, user }
         commission: newCommission,
       });
       const status = deriveInvoiceStatus(outstanding, inv.billAmount, inv.dueDate);
+      creditAccountDelta += outstanding - Number(inv.outstanding || 0);
 
       tx.update(invoiceRefs[idx], {
         received: newReceived,
@@ -283,6 +297,14 @@ export async function allocatePaymentToInvoices({ paymentId, allocations, user }
         createdAt: serverTimestamp(),
       });
     });
+
+    if (payment.customerId && creditAccountDelta !== 0) {
+      tx.set(
+        doc(db, COLLECTIONS.CREDIT_ACCOUNTS, payment.customerId),
+        { currentOutstanding: increment(round2(creditAccountDelta)) },
+        { merge: true },
+      );
+    }
   });
 
   await logAudit({ user, action: 'Receipt Updated', module: 'Receipts', newValue: { paymentId, allocations } });

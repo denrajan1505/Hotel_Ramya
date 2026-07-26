@@ -1,4 +1,4 @@
-import { writeBatch, collection, doc, getDocs, query, where } from 'firebase/firestore';
+import { writeBatch, collection, doc, getDocs, query, where, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { readExcelFile } from '../utils/excelExport';
@@ -128,7 +128,12 @@ export async function findExistingBusinessDates(businessDates) {
   return existing;
 }
 
+/** Deletes invoices for the given business dates and returns the per-customer
+ * NET DELTA to apply to creditAccounts.currentOutstanding for the removal
+ * alone (negative — outstanding went away with the deleted invoices), so the
+ * caller can add the replacement invoices' own deltas into the same map. */
 async function deleteInvoicesForDates(businessDates) {
+  const creditAccountDelta = new Map();
   for (const dateStr of businessDates) {
     const start = new Date(`${dateStr}T00:00:00`);
     const end = new Date(`${dateStr}T23:59:59.999`);
@@ -138,6 +143,13 @@ async function deleteInvoicesForDates(businessDates) {
       where('businessDate', '<=', end),
     );
     const snap = await getDocs(q);
+    snap.docs.forEach((d) => {
+      const inv = d.data();
+      if (inv.customerId) {
+        const removedOutstanding = Number(inv.outstanding) || 0;
+        creditAccountDelta.set(inv.customerId, (creditAccountDelta.get(inv.customerId) || 0) - removedOutstanding);
+      }
+    });
     const chunks = chunkArray(snap.docs, 450);
     for (const chunk of chunks) {
       const batch = writeBatch(db);
@@ -145,6 +157,7 @@ async function deleteInvoicesForDates(businessDates) {
       await batch.commit();
     }
   }
+  return creditAccountDelta;
 }
 
 function chunkArray(arr, size) {
@@ -159,11 +172,15 @@ function chunkArray(arr, size) {
  * matched customer's credit days, and writes in batches of 450 for speed on
  * large imports. Pass `replaceDates` (from findExistingBusinessDates, after
  * user confirmation) to wipe those business dates first.
+ *
+ * Credit account balances are kept in sync client-side (no Cloud Functions
+ * trigger available on the Spark plan): every new invoice's starting
+ * outstanding, netted against whatever was removed by a replace, is applied
+ * to each affected customer's creditAccounts doc via increment() once all
+ * invoice writes are done.
  */
 export async function commitFoCashierImport({ included, customerMasterList, replaceDates = [], user }) {
-  if (replaceDates.length) {
-    await deleteInvoicesForDates(replaceDates);
-  }
+  const creditAccountDelta = replaceDates.length ? await deleteInvoicesForDates(replaceDates) : new Map();
 
   const creditDaysByCustomerId = new Map(customerMasterList.map((c) => [c.id, c.creditDays ?? 30]));
   const now = new Date();
@@ -210,6 +227,22 @@ export async function commitFoCashierImport({ included, customerMasterList, repl
         importedBy: user?.displayName || user?.username || 'system',
       });
       imported += 1;
+
+      if (classification.customerId) {
+        creditAccountDelta.set(classification.customerId, (creditAccountDelta.get(classification.customerId) || 0) + outstanding);
+      }
+    }
+    await batch.commit();
+  }
+
+  const customerIds = [...creditAccountDelta.keys()];
+  const accountChunks = chunkArray(customerIds, 450);
+  for (const idsChunk of accountChunks) {
+    const batch = writeBatch(db);
+    for (const customerId of idsChunk) {
+      const delta = Math.round((creditAccountDelta.get(customerId) || 0) * 100) / 100;
+      if (delta === 0) continue;
+      batch.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, customerId), { currentOutstanding: increment(delta) }, { merge: true });
     }
     await batch.commit();
   }

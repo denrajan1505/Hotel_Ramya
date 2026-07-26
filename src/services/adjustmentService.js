@@ -1,4 +1,4 @@
-import { doc, addDoc, updateDoc, collection, getDocs, query, orderBy, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { doc, addDoc, updateDoc, collection, getDocs, query, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
@@ -53,9 +53,18 @@ export async function approveAdjustment(adjustmentId, user) {
       adjustment: newAdjustmentTotal,
     });
     const status = deriveInvoiceStatus(outstanding, inv.billAmount, inv.dueDate);
+    const creditAccountDelta = outstanding - Number(inv.outstanding || 0);
 
     tx.update(invoiceRef, { adjustment: newAdjustmentTotal, outstanding, status });
     tx.update(adjustmentRef, { status: 'Approved', approvedBy: user?.uid || null, approvedAt: serverTimestamp() });
+
+    if (inv.customerId && creditAccountDelta !== 0) {
+      tx.set(
+        doc(db, COLLECTIONS.CREDIT_ACCOUNTS, inv.customerId),
+        { currentOutstanding: increment(Math.round(creditAccountDelta * 100) / 100) },
+        { merge: true },
+      );
+    }
   });
 
   await logAudit({ user, action: 'Adjustment Approved', module: 'Adjustments' });

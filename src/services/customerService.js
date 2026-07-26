@@ -1,10 +1,22 @@
-import { crudFor, where, orderBy } from './firestoreCrud';
+import { doc, setDoc, deleteDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { crudFor, orderBy } from './firestoreCrud';
 import { COLLECTIONS } from '../constants/collections';
 import { SEED_CUSTOMERS } from '../constants/categories';
 import { logAudit } from './auditService';
 
 const customers = crudFor(COLLECTIONS.CUSTOMER_MASTER);
 const creditAccounts = crudFor(COLLECTIONS.CREDIT_ACCOUNTS);
+
+// creditAccounts documents are keyed BY customer ID (not auto-generated),
+// so payment/receipt/adjustment/import transactions can target a customer's
+// account with a direct doc ref — no query needed inside a transaction,
+// which is what makes the client-side currentOutstanding sync possible
+// without a Cloud Functions trigger. See paymentService/receiptService/
+// adjustmentService/importService for the increment() calls that keep it live.
+function creditAccountRef(customerId) {
+  return doc(db, COLLECTIONS.CREDIT_ACCOUNTS, customerId);
+}
 
 export async function listCustomers() {
   return customers.list([orderBy('name')]);
@@ -23,13 +35,14 @@ export async function seedCustomersIfEmpty() {
       active: true,
       createdBy: 'system-seed',
     });
-    await creditAccounts.create({
+    await setDoc(creditAccountRef(id), {
       customerId: id,
       customerName: seed.name,
       creditLimit: 0,
       creditDays: 30,
       currentOutstanding: 0,
       status: 'Active',
+      createdAt: serverTimestamp(),
     });
   }
 }
@@ -52,13 +65,14 @@ export async function createCustomer(data, user) {
     createdBy: user?.uid,
   });
 
-  await creditAccounts.create({
+  await setDoc(creditAccountRef(id), {
     customerId: id,
     customerName: data.name,
     creditLimit: Number(data.creditLimit) || 0,
     creditDays: Number(data.creditDays) || 30,
     currentOutstanding: 0,
     status: 'Active',
+    createdAt: serverTimestamp(),
   });
 
   await logAudit({ user, action: 'Customer Created', module: 'Customers', newValue: data });
@@ -69,13 +83,14 @@ export async function updateCustomer(id, data, user) {
   const before = await customers.get(id);
   await customers.update(id, data);
   if (data.creditLimit !== undefined || data.creditDays !== undefined) {
-    const accounts = await creditAccounts.list([where('customerId', '==', id)]);
-    if (accounts[0]) {
-      await creditAccounts.update(accounts[0].id, {
-        creditLimit: Number(data.creditLimit) || accounts[0].creditLimit,
-        creditDays: Number(data.creditDays) || accounts[0].creditDays,
-      });
-    }
+    await setDoc(
+      creditAccountRef(id),
+      {
+        creditLimit: Number(data.creditLimit) || 0,
+        creditDays: Number(data.creditDays) || 30,
+      },
+      { merge: true },
+    );
   }
   await logAudit({ user, action: 'Customer Updated', module: 'Customers', oldValue: before, newValue: data });
 }
@@ -83,6 +98,7 @@ export async function updateCustomer(id, data, user) {
 export async function deleteCustomer(id, user) {
   const before = await customers.get(id);
   await customers.remove(id);
+  await deleteDoc(creditAccountRef(id));
   await logAudit({ user, action: 'Customer Deleted', module: 'Customers', oldValue: before });
 }
 
@@ -94,9 +110,31 @@ export function subscribeCreditAccounts(callback) {
   return creditAccounts.subscribe([], callback);
 }
 
-export async function updateCreditAccountOutstanding(customerId, currentOutstanding) {
-  const accounts = await creditAccounts.list([where('customerId', '==', customerId)]);
-  if (accounts[0]) {
-    await creditAccounts.update(accounts[0].id, { currentOutstanding });
+/**
+ * Manual reconciliation tool (Settings, Administrator only). The
+ * currentOutstanding field is kept live by increment() calls made inside
+ * every transaction that changes an invoice's outstanding balance — see
+ * paymentService, receiptService, adjustmentService and importService. This
+ * recalculates it from scratch by summing invoices, as a safety net against
+ * any drift (e.g. data edited outside the normal flows).
+ */
+export async function recalculateCreditAccountBalances(user) {
+  const invoicesSnap = await getDocs(collection(db, COLLECTIONS.INVOICES));
+  const totals = new Map();
+  invoicesSnap.docs.forEach((d) => {
+    const inv = d.data();
+    if (!inv.customerId) return;
+    totals.set(inv.customerId, (totals.get(inv.customerId) || 0) + (Number(inv.outstanding) || 0));
+  });
+
+  const accountsSnap = await getDocs(collection(db, COLLECTIONS.CREDIT_ACCOUNTS));
+  let updated = 0;
+  for (const accountDoc of accountsSnap.docs) {
+    const currentOutstanding = Math.round((totals.get(accountDoc.id) || 0) * 100) / 100;
+    await setDoc(accountDoc.ref, { currentOutstanding }, { merge: true });
+    updated += 1;
   }
+
+  await logAudit({ user, action: 'Credit Account Balances Recalculated', module: 'Settings', newValue: { accountsUpdated: updated } });
+  return { accountsUpdated: updated };
 }

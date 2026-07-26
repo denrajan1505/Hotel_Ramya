@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, usernameToEmail } from '../firebase/config';
+import { auth, db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { hasPermission } from '../constants/roles';
 import { logAudit } from '../services/auditService';
+import { resolveUsernameToEmail } from '../services/usernameService';
 
 const AuthContext = createContext(null);
 
@@ -28,7 +29,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (username, password) => {
-    const email = usernameToEmail(username);
+    const email = await resolveUsernameToEmail(username);
+    if (!email) {
+      throw new Error('Invalid username or password.');
+    }
     const credential = await signInWithEmailAndPassword(auth, email, password);
     const userRef = doc(db, COLLECTIONS.USERS, credential.user.uid);
     const snap = await getDoc(userRef);

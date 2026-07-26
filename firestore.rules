@@ -40,13 +40,42 @@ service cloud.firestore {
       return isSignedIn() && isActive();
     }
 
+    function onlyChanged(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // Everything below runs entirely client-side (Spark/free plan — no
+    // Cloud Functions, no Admin SDK). Two spots intentionally trade a small
+    // amount of strictness for that:
+    //  - `usernames/{username}` is publicly readable so login can resolve a
+    //    typed username to a real email BEFORE the user is authenticated.
+    //  - `creditAccounts.currentOutstanding` is writable by any active
+    //    operating role (not just Administrator) because payment/receipt/
+    //    adjustment/import transactions update it inline, in place of the
+    //    old onInvoiceWriteUpdateCreditAccount trigger.
     match /users/{uid} {
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      // User docs are created/edited via Cloud Functions (Admin SDK) so a
-      // brand-new admin session is never hijacked mid-creation. Direct client
-      // writes are limited to an admin editing non-security fields.
-      allow update: if isAdmin() && !('role' in request.resource.data.diff(resource.data).affectedKeys());
-      allow create, delete: if false;
+      // Account creation happens client-side (see src/services/userService.js
+      // + src/firebase/secondaryAuth.js): an isolated secondary Firebase app
+      // instance creates the Auth user without touching the admin's own
+      // session, then the admin's primary session writes this profile doc.
+      allow create: if isAdmin();
+      // Admins can edit anything (including role — there is no Cloud
+      // Function gate anymore). A user may update only their own lastLogin
+      // timestamp on their own doc (set right after they sign themselves in).
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == uid && onlyChanged(['lastLogin']));
+      allow delete: if false;
+    }
+
+    match /usernames/{username} {
+      allow read: if true;
+      // `create`-only (no update/delete) makes this a write-once claim: a
+      // duplicate username collides on the doc ID and Firestore evaluates
+      // that as an `update`, which nothing here allows — that's what gives
+      // userService.createUser() a race-safe uniqueness guarantee without a
+      // transaction spanning Auth + Firestore.
+      allow create: if isAdmin();
+      allow update, delete: if false;
     }
 
     match /customerMaster/{id} {
@@ -57,7 +86,16 @@ service cloud.firestore {
 
     match /creditAccounts/{id} {
       allow read: if canRead();
-      allow write: if isAdmin();
+      // Created alongside a new customer, so whoever can create customers
+      // (Admin + Credit Officer) can initialize their credit account too.
+      allow create: if isAdmin() || isCreditOfficer();
+      allow delete: if isAdmin();
+      // Editing an EXISTING account's creditLimit/creditDays is "manage
+      // credit limits" — Administrator only, per spec. Any active operating
+      // role may still update currentOutstanding, since that's a side effect
+      // of their own payment/receipt/adjustment/import transactions, not a
+      // limit change.
+      allow update: if isAdmin() || (canOperate() && onlyChanged(['currentOutstanding']));
     }
 
     match /invoices/{id} {
