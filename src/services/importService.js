@@ -10,19 +10,36 @@ import { logAudit } from './auditService';
 // FO Cashier Reports vary by property; map several plausible header spellings
 // to the canonical field names the rest of the app relies on.
 const HEADER_ALIASES = {
-  businessDate: ['business date', 'businessdate', 'date'],
-  billNumber: ['bill number', 'bill no', 'billno', 'invoice number', 'folio number', 'folio no'],
+  businessDate: ['business date', 'businessdate', 'date', 'bill date'],
+  billNumber: ['bill number', 'bill no', 'billno', 'invoice number', 'folio number', 'folio no', 'bill'],
   guestName: ['guest name', 'guestname', 'name'],
-  companyName: ['company name', 'companyname', 'company', 'ta/company', 'travel agent'],
+  companyName: ['company name', 'companyname', 'ta/company', 'travel agent'],
   billStatus: ['bill status', 'status', 'bill type', 'type'],
   roomNumber: ['room number', 'room no', 'room'],
   checkInDate: ['check-in date', 'check in date', 'checkin date', 'arrival date'],
-  checkOutDate: ['check-out date', 'check out date', 'checkout date', 'departure date'],
+  checkOutDate: ['check-out date', 'check out date', 'checkout date', 'departure date', 'departure'],
   billAmount: ['bill amount', 'billamount', 'amount', 'net amount', 'total amount'],
   advance: ['advance', 'advance amount'],
   referenceName: ['reference name', 'reference', 'ref name'],
   department: ['department', 'dept'],
   remarks: ['remarks', 'remark', 'notes'],
+};
+
+// Some FO Cashier Report layouts (settlement-style exports) have no single
+// "Bill Amount" column — instead the amount sits under whichever payment-mode
+// column the bill was settled through. Rows settled to Company/Staff are the
+// genuine credit business (billed to an account, collected later); the rest
+// are already paid in full at checkout and only need to be recognised so the
+// UI can report them as excluded rather than silently vanishing.
+const CREDIT_MODE_ALIASES = { company: ['company'], staff: ['staff'] };
+const SETTLED_MODE_ALIASES = {
+  cash: ['receipts'],
+  card: ['c.card'],
+  cheque: ['cheque/bank transfer'],
+  upi: ['upi'],
+  transfer: ['transfer'],
+  hold: ['hold'],
+  forex: ['forex'],
 };
 
 const MANDATORY_FIELDS = ['businessDate', 'billNumber', 'billAmount'];
@@ -70,8 +87,43 @@ function buildHeaderMap(headerRow) {
   return map;
 }
 
-export function validateHeaderMap(headerMap) {
-  const missing = MANDATORY_FIELDS.filter((f) => headerMap[f] === undefined);
+// Maps each payment mode to the column index it was found at, using the same
+// alias-matching rules as buildHeaderMap but against a separate field set so
+// e.g. a "Company" settlement-mode column never collides with a genuine
+// "Company Name" text column.
+function buildModeMap(headerRow, aliasSet) {
+  const map = {};
+  headerRow.forEach((cell, index) => {
+    const norm = normalizeHeader(cell);
+    if (!norm) return;
+    for (const [mode, aliases] of Object.entries(aliasSet)) {
+      if (map[mode] === undefined && aliases.includes(norm)) map[mode] = index;
+    }
+  });
+  return map;
+}
+
+function sumModeColumns(row, modeMap) {
+  return Object.values(modeMap).reduce((total, index) => total + (Number(row[index]) || 0), 0);
+}
+
+// businessDate is always local midnight; toISOString() converts to UTC first,
+// which shifts the calendar day backward in any timezone ahead of UTC
+// (e.g. IST) and would silently misdate the "already imported" duplicate check.
+function toLocalDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function validateHeaderMap(headerMap, creditModeMap = {}) {
+  const missing = [];
+  if (headerMap.businessDate === undefined) missing.push('businessDate');
+  if (headerMap.billNumber === undefined) missing.push('billNumber');
+  const hasBillAmountColumn = headerMap.billAmount !== undefined;
+  const hasCreditModeColumns = Object.keys(creditModeMap).length > 0;
+  if (!hasBillAmountColumn && !hasCreditModeColumns) missing.push('billAmount');
   return { valid: missing.length === 0, missing };
 }
 
@@ -80,10 +132,21 @@ function isExcludedRow(billStatus) {
   return EXCLUDED_STATUS_KEYWORDS.some((kw) => value.includes(kw));
 }
 
+// Real-world FO Cashier exports write dates as plain DD/MM/YYYY[ HH:MM] text,
+// not real Excel date cells — native `new Date(...)` parses that as US
+// MM/DD/YYYY (or rejects it outright when the day is > 12), silently
+// corrupting or dropping every row. Parse the Indian day-first format
+// explicitly before falling back to the generic formatter helper.
 function excelSerialOrDate(value) {
   if (value === '' || value == null) return null;
-  const asDate = toDate(value);
-  return asDate;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const dmy = String(value).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (dmy) {
+    const [, d, m, y, h, min] = dmy;
+    const date = new Date(Number(y), Number(m) - 1, Number(d), Number(h) || 0, Number(min) || 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return toDate(value);
 }
 
 /** Step 1: parse the workbook and normalize rows without touching Firestore yet, so the UI can preview + confirm before import. */
@@ -94,8 +157,12 @@ export async function parseFoCashierFile(file) {
   }
 
   const headerRowIndex = findHeaderRowIndex(rows);
-  const headerMap = buildHeaderMap(rows[headerRowIndex] || []);
-  const validation = validateHeaderMap(headerMap);
+  const headerRow = rows[headerRowIndex] || [];
+  const headerMap = buildHeaderMap(headerRow);
+  const creditModeMap = buildModeMap(headerRow, CREDIT_MODE_ALIASES);
+  const settledModeMap = buildModeMap(headerRow, SETTLED_MODE_ALIASES);
+  const hasBillAmountColumn = headerMap.billAmount !== undefined;
+  const validation = validateHeaderMap(headerMap, creditModeMap);
   if (!validation.valid) {
     return { headerMap, validation, businessDates: [], included: [], excluded: [] };
   }
@@ -105,36 +172,51 @@ export async function parseFoCashierFile(file) {
   const businessDateSet = new Set();
 
   for (const row of rows.slice(headerRowIndex + 1)) {
-    if (!row || row.every((cell) => cell === '' || cell == null)) continue;
-    const billStatus = row[headerMap.billStatus] || '';
+    if (!row || row.every((cell) => String(cell).trim() === '')) continue;
+    const billNumber = String(row[headerMap.billNumber] ?? '').trim();
+    const businessDate = excelSerialOrDate(row[headerMap.businessDate]);
+    if (!billNumber || !businessDate) continue;
+
+    const billStatus = String(row[headerMap.billStatus] ?? '').trim();
+    const creditAmount = hasBillAmountColumn ? Number(row[headerMap.billAmount]) || 0 : sumModeColumns(row, creditModeMap);
+    const settledAmount = hasBillAmountColumn ? 0 : sumModeColumns(row, settledModeMap);
+
+    let companyName = String(row[headerMap.companyName] ?? '').trim();
+    const remarks = String(row[headerMap.remarks] ?? '').trim();
+    if (!hasBillAmountColumn && !companyName && creditAmount > 0) companyName = remarks;
+
     const normalized = {
-      businessDate: excelSerialOrDate(row[headerMap.businessDate]),
-      billNumber: String(row[headerMap.billNumber] ?? '').trim(),
+      businessDate,
+      billNumber,
       guestName: String(row[headerMap.guestName] ?? '').trim(),
-      companyName: String(row[headerMap.companyName] ?? '').trim(),
+      companyName,
       roomNumber: String(row[headerMap.roomNumber] ?? '').trim(),
       checkInDate: excelSerialOrDate(row[headerMap.checkInDate]),
       checkOutDate: excelSerialOrDate(row[headerMap.checkOutDate]),
-      billAmount: Number(row[headerMap.billAmount]) || 0,
+      billAmount: creditAmount,
       advance: Number(row[headerMap.advance]) || 0,
       referenceName: String(row[headerMap.referenceName] ?? '').trim(),
       department: String(row[headerMap.department] ?? '').trim(),
-      remarks: String(row[headerMap.remarks] ?? '').trim(),
-      billStatus: String(billStatus).trim(),
+      remarks,
+      billStatus,
     };
 
-    if (!normalized.billNumber || !normalized.businessDate) continue;
-    if (normalized.billAmount <= 0) continue;
-
-    if (isExcludedRow(billStatus)) {
-      excluded.push(normalized);
-      continue;
+    if (hasBillAmountColumn) {
+      if (normalized.billAmount <= 0) continue;
+      if (isExcludedRow(billStatus)) {
+        excluded.push(normalized);
+        continue;
+      }
+    } else {
+      if (creditAmount <= 0) {
+        if (settledAmount <= 0) continue;
+        excluded.push(normalized);
+        continue;
+      }
     }
 
     included.push(normalized);
-    if (normalized.businessDate) {
-      businessDateSet.add(normalized.businessDate.toISOString().slice(0, 10));
-    }
+    businessDateSet.add(toLocalDateKey(normalized.businessDate));
   }
 
   return { headerMap, validation, businessDates: [...businessDateSet].sort(), included, excluded };
