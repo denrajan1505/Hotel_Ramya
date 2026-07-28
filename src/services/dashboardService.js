@@ -1,47 +1,61 @@
-import {
-  collection,
-  getCountFromServer,
-  getAggregateFromServer,
-  sum,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-} from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { toDate } from '../utils/formatters';
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const invoicesCol = collection(db, COLLECTIONS.INVOICES);
 const paymentsCol = collection(db, COLLECTIONS.PAYMENTS);
 const customersCol = collection(db, COLLECTIONS.CUSTOMER_MASTER);
 const creditAccountsCol = collection(db, COLLECTIONS.CREDIT_ACCOUNTS);
 
-/** Uses Firestore server-side aggregation (count/sum) so summary cards stay fast even at tens of thousands of invoices, instead of downloading every document. */
+/**
+ * Summed/counted client-side from plain getDocs reads, same as every other
+ * query in this file — Firestore's server-side aggregation API
+ * (getAggregateFromServer/getCountFromServer) was tried here first but a
+ * single failed call in its Promise.all silently blanked every summary card
+ * with no visible error. This trades a bit of read volume (fine at this
+ * hotel's invoice scale) for cards that reliably show real numbers.
+ */
 export async function fetchSummaryCards() {
-  const [outstandingAgg, customerCount, creditLimitAgg, pendingCount, overdueCount] = await Promise.all([
-    getAggregateFromServer(invoicesCol, { total: sum('outstanding') }),
-    getCountFromServer(customersCol),
-    getAggregateFromServer(creditAccountsCol, { total: sum('creditLimit') }),
-    getCountFromServer(query(invoicesCol, where('status', 'in', ['Unpaid', 'Partially Paid']))),
-    getCountFromServer(query(invoicesCol, where('status', '==', 'Overdue'))),
-  ]);
-
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const todaysCollectionsAgg = await getAggregateFromServer(
-    query(paymentsCol, where('createdAt', '>=', startOfToday)),
-    { total: sum('receivedAmount') },
-  );
+
+  const [invoicesSnap, customersSnap, creditAccountsSnap, todaysPaymentsSnap] = await Promise.all([
+    getDocs(invoicesCol),
+    getDocs(customersCol),
+    getDocs(creditAccountsCol),
+    getDocs(query(paymentsCol, where('createdAt', '>=', startOfToday))),
+  ]);
+
+  let totalOutstanding = 0;
+  let pendingInvoices = 0;
+  let overdueCustomers = 0;
+  invoicesSnap.docs.forEach((d) => {
+    const inv = d.data();
+    totalOutstanding += Number(inv.outstanding) || 0;
+    if (inv.status === 'Unpaid' || inv.status === 'Partially Paid') pendingInvoices += 1;
+    if (inv.status === 'Overdue') overdueCustomers += 1;
+  });
+
+  let totalCreditLimit = 0;
+  creditAccountsSnap.docs.forEach((d) => {
+    totalCreditLimit += Number(d.data().creditLimit) || 0;
+  });
+
+  let todaysCollections = 0;
+  todaysPaymentsSnap.docs.forEach((d) => {
+    todaysCollections += Number(d.data().receivedAmount) || 0;
+  });
 
   return {
-    totalOutstanding: outstandingAgg.data().total || 0,
-    todaysCollections: todaysCollectionsAgg.data().total || 0,
-    totalCustomers: customerCount.data().count || 0,
-    totalCreditLimit: creditLimitAgg.data().total || 0,
-    pendingInvoices: pendingCount.data().count || 0,
-    overdueCustomers: overdueCount.data().count || 0,
+    totalOutstanding: round2(totalOutstanding),
+    todaysCollections: round2(todaysCollections),
+    totalCustomers: customersSnap.size,
+    totalCreditLimit: round2(totalCreditLimit),
+    pendingInvoices,
+    overdueCustomers,
   };
 }
 
