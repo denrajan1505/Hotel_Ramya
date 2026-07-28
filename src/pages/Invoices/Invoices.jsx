@@ -1,19 +1,35 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
+import toast from 'react-hot-toast';
 import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
-import { listInvoices } from '../../services/invoiceService';
+import { listInvoices, updateInvoice } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
-import { CATEGORY_TABS } from '../../constants/categories';
+import { CATEGORY_TABS, CATEGORIES } from '../../constants/categories';
+import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 
 export default function Invoices() {
+  const { user, can } = useAuth();
+  const queryClient = useQueryClient();
   const { data: invoices, isLoading } = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });
   const [activeTab, setActiveTab] = useState('ALL');
   const [selected, setSelected] = useState(null);
+
+  const canEditCategory = can('MANAGE_INVOICE_CATEGORY');
+
+  const categoryMutation = useMutation({
+    mutationFn: ({ invoice, category }) => updateInvoice(invoice.id, { category }, user),
+    onSuccess: (_, { invoice, category }) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      setSelected((prev) => (prev && prev.id === invoice.id ? { ...prev, category } : prev));
+      toast.success('Invoice moved to ' + category);
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const filtered = useMemo(() => {
     const tab = CATEGORY_TABS.find((t) => t.key === activeTab);
@@ -51,19 +67,30 @@ export default function Invoices() {
           { key: 'customerName', header: 'Customer' },
           { key: 'category', header: 'Category', render: (r) => <StatusBadge value={r.category} /> },
           { key: 'billAmount', header: 'Bill Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) },
+          { key: 'received', header: 'Received Amount', align: 'right', render: (r) => formatCurrency(r.received) },
           { key: 'advance', header: 'Advance', align: 'right', render: (r) => formatCurrency(r.advance) },
-          { key: 'outstanding', header: 'Outstanding', align: 'right', render: (r) => formatCurrency(r.outstanding) },
+          { key: 'commission', header: 'Commission', align: 'right', render: (r) => formatCurrency(r.commission) },
+          { key: 'tcs', header: 'TCS', align: 'right', render: (r) => formatCurrency(r.tcs) },
+          { key: 'tds', header: 'TDS', align: 'right', render: (r) => formatCurrency(r.tds) },
+          { key: 'adjustment', header: 'Discount', align: 'right', render: (r) => formatCurrency(r.adjustment) },
+          { key: 'outstanding', header: 'Balance', align: 'right', render: (r) => formatCurrency(r.outstanding) },
           { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
           { key: 'status', header: 'Status', render: (r) => <StatusBadge value={r.status} /> },
         ]}
       />
 
-      <InvoiceDetailModal invoice={selected} onClose={() => setSelected(null)} />
+      <InvoiceDetailModal
+        invoice={selected}
+        onClose={() => setSelected(null)}
+        canEditCategory={canEditCategory}
+        onCategoryChange={(category) => categoryMutation.mutate({ invoice: selected, category })}
+        categoryPending={categoryMutation.isPending}
+      />
     </div>
   );
 }
 
-function InvoiceDetailModal({ invoice, onClose }) {
+function InvoiceDetailModal({ invoice, onClose, canEditCategory, onCategoryChange, categoryPending }) {
   const { data: allocations } = useQuery({
     queryKey: ['invoice-allocations', invoice?.id],
     queryFn: () => listPaymentAllocationsForInvoice(invoice.id),
@@ -77,7 +104,27 @@ function InvoiceDetailModal({ invoice, onClose }) {
       <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
         <Field label="Guest Name" value={invoice.guestName} />
         <Field label="Company" value={invoice.companyName || '—'} />
-        <Field label="Category" value={<StatusBadge value={invoice.category} />} />
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Category</p>
+          {canEditCategory ? (
+            <select
+              className="input mt-0.5 !py-1.5 !text-sm"
+              value={invoice.category}
+              disabled={categoryPending}
+              onChange={(e) => onCategoryChange(e.target.value)}
+            >
+              {Object.values(CATEGORIES).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-0.5">
+              <StatusBadge value={invoice.category} />
+            </p>
+          )}
+        </div>
         <Field label="Room No" value={invoice.roomNumber} />
         <Field label="Check-In" value={formatDate(invoice.checkInDate)} />
         <Field label="Check-Out" value={formatDate(invoice.checkOutDate)} />

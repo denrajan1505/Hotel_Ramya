@@ -13,6 +13,7 @@ export const CATEGORY_TABS = [
   { key: 'INDIVIDUAL', label: 'Individual', value: CATEGORIES.INDIVIDUAL },
   { key: 'PORTAL', label: 'Portals', value: CATEGORIES.PORTAL },
   { key: 'TRAVEL', label: 'Travels', value: CATEGORIES.TRAVEL },
+  { key: 'UNCLASSIFIED', label: 'Unclassified', value: CATEGORIES.UNCLASSIFIED },
 ];
 
 // Seed data used the first time the Customer Master is empty, matching the
@@ -53,4 +54,4 @@ export const INVOICE_STATUS = {
   OVERDUE: 'Overdue',
 };
 
-export const PAYMENT_MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Cheque', 'Cash Deposit', 'Credit Card', 'Other'];
+export const PAYMENT_MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Card', 'Credit Card', 'Razorpay', 'Cheque', 'Cash', 'Cash Deposit', 'Other'];

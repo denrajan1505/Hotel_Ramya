@@ -12,6 +12,7 @@ import { listCustomers, createCustomer, updateCustomer, deleteCustomer } from '.
 import { CATEGORIES } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/formatters';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 export default function Customers() {
   const { user, can } = useAuth();
@@ -45,6 +46,7 @@ export default function Customers() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      invalidateDashboard(queryClient);
       toast.success(editing ? 'Customer updated' : 'Customer created');
       setModalOpen(false);
     },
@@ -55,6 +57,8 @@ export default function Customers() {
     mutationFn: () => deleteCustomer(deleteTarget.id, user),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      invalidateDashboard(queryClient);
       toast.success('Customer deleted');
       setDeleteTarget(null);
     },

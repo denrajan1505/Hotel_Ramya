@@ -1,13 +1,17 @@
-import { useState, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { useMemo, useState, useRef } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, AlertTriangle, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
+import StatusBadge from '../../components/common/StatusBadge';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Loader from '../../components/common/Loader';
 import { parseFoCashierFile, findExistingBusinessDates, commitFoCashierImport } from '../../services/importService';
-import { listCustomers } from '../../services/customerService';
+import { listCustomers, createCustomer } from '../../services/customerService';
+import { classifyInvoiceRow } from '../../utils/customerClassification';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
+import { CATEGORIES } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 
@@ -24,6 +28,40 @@ export default function ImportFOCashier() {
   const [result, setResult] = useState(null);
 
   const { data: customers } = useQuery({ queryKey: ['customers'], queryFn: listCustomers });
+
+  // Live classification preview — reruns against the Customer Master on every
+  // change (including customers created inline below), so the "Rows to
+  // Import" table and the unmatched-names list always reflect the latest match state.
+  const classifiedRows = useMemo(() => {
+    if (!parsed?.included) return [];
+    return parsed.included.map((row) => ({ ...row, ...classifyInvoiceRow(row, customers || []) }));
+  }, [parsed, customers]);
+
+  const unmatchedGroups = useMemo(() => {
+    const map = new Map();
+    for (const row of classifiedRows) {
+      if (row.category !== CATEGORIES.UNCLASSIFIED) continue;
+      const key = row.customerName || 'Unknown';
+      if (!map.has(key)) {
+        map.set(key, { name: key, count: 0, totalAmount: 0, defaultCategory: row.companyName ? CATEGORIES.COMPANY : CATEGORIES.INDIVIDUAL });
+      }
+      const group = map.get(key);
+      group.count += 1;
+      group.totalAmount += row.billAmount;
+    }
+    return [...map.values()].sort((a, b) => b.totalAmount - a.totalAmount);
+  }, [classifiedRows]);
+
+  const createCustomerMutation = useMutation({
+    mutationFn: ({ name, category }) => createCustomer({ name, category }, user),
+    onSuccess: (_, { name }) => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      invalidateDashboard(queryClient);
+      toast.success(`Customer "${name}" created and classified`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -66,7 +104,8 @@ export default function ImportFOCashier() {
       });
       setResult(res);
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      invalidateDashboard(queryClient);
       toast.success(`Imported ${res.imported} invoices`);
     } catch (err) {
       toast.error(err.message);
@@ -144,9 +183,35 @@ export default function ImportFOCashier() {
                 </div>
               )}
 
+              {unmatchedGroups.length > 0 && (
+                <div className="glass-card border border-warning-200 p-4 dark:border-warning-500/30">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 shrink-0 text-warning-500" size={18} />
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {unmatchedGroups.length} name{unmatchedGroups.length === 1 ? '' : 's'} in this file don't match the Customer Master
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        These bills will import as Unclassified. Pick a category and create the customer now so they're picked up automatically.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {unmatchedGroups.map((group) => (
+                      <UnmatchedCustomerRow
+                        key={group.name}
+                        group={group}
+                        pending={createCustomerMutation.isPending}
+                        onCreate={(category) => createCustomerMutation.mutate({ name: group.name, category })}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <DataTable
                 exportable={false}
-                rows={parsed.included}
+                rows={classifiedRows}
                 emptyLabel="No importable rows found."
                 columns={[
                   { key: 'businessDate', header: 'Business Date', render: (r) => formatDate(r.businessDate) },
@@ -156,6 +221,7 @@ export default function ImportFOCashier() {
                   { key: 'roomNumber', header: 'Room' },
                   { key: 'billAmount', header: 'Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) },
                   { key: 'department', header: 'Department' },
+                  { key: 'category', header: 'Category', render: (r) => <StatusBadge value={r.category} /> },
                 ]}
               />
 
@@ -188,6 +254,35 @@ export default function ImportFOCashier() {
         danger
         loading={importing}
       />
+    </div>
+  );
+}
+
+function UnmatchedCustomerRow({ group, onCreate, pending }) {
+  const [category, setCategory] = useState(group.defaultCategory);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-2.5 text-sm dark:bg-white/5">
+      <div>
+        <p className="font-medium text-slate-700 dark:text-slate-200">{group.name}</p>
+        <p className="text-xs text-slate-400">
+          {group.count} bill{group.count === 1 ? '' : 's'} · {formatCurrency(group.totalAmount)}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <select className="input !w-auto !py-1.5 !text-sm" value={category} onChange={(e) => setCategory(e.target.value)}>
+          {Object.values(CATEGORIES)
+            .filter((c) => c !== CATEGORIES.UNCLASSIFIED)
+            .map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+        </select>
+        <button type="button" onClick={() => onCreate(category)} disabled={pending} className="btn-outline !px-3 !py-1.5 text-xs">
+          <Plus size={14} /> Create
+        </button>
+      </div>
     </div>
   );
 }

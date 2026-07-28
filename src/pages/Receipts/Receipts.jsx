@@ -11,6 +11,7 @@ import { listReceipts, getReceipt, listReceiptAllocations, cancelReceipt } from 
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { exportReceiptPdf } from '../../utils/pdfExport';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 export default function Receipts() {
   const { user, can } = useAuth();
@@ -49,6 +50,8 @@ export default function Receipts() {
         onCancelled={() => {
           queryClient.invalidateQueries({ queryKey: ['receipts'] });
           queryClient.invalidateQueries({ queryKey: ['invoices'] });
+          queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+          invalidateDashboard(queryClient);
         }}
       />
     </div>

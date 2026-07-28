@@ -15,6 +15,7 @@ import {
   UserCog,
   Settings,
   ScrollText,
+  GitMerge,
 } from 'lucide-react';
 
 export const NAV_ITEMS = [
@@ -24,6 +25,7 @@ export const NAV_ITEMS = [
   { to: '/import-fo-cashier', label: 'Import FO Cashier Report', icon: UploadCloud, permission: 'IMPORT_FO_REPORT' },
   { to: '/invoices', label: 'Invoices', icon: FileText },
   { to: '/payments', label: 'Payments', icon: CreditCard, permission: 'RECORD_PAYMENTS' },
+  { to: '/bill-matching', label: 'Bill Matching', icon: GitMerge, permission: 'ALLOCATE_PAYMENTS' },
   { to: '/receipts', label: 'Receipts', icon: Receipt },
   { to: '/adjustments', label: 'Adjustments', icon: SlidersHorizontal },
   { to: '/customer-ledger', label: 'Customer Ledger', icon: BookOpen },

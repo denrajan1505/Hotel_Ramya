@@ -7,6 +7,7 @@ import { listDepartments, createDepartment, deleteDepartment } from '../../servi
 import { seedCustomersIfEmpty, recalculateCreditAccountBalances } from '../../services/customerService';
 import { downloadFullBackup } from '../../services/backupService';
 import { useAuth } from '../../context/AuthContext';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 export default function Settings() {
   const { user, can } = useAuth();
@@ -33,6 +34,8 @@ export default function Settings() {
       await seedCustomersIfEmpty();
       toast.success('Seeded known portals/travel agencies into Customer Master (skipped if not empty)');
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      invalidateDashboard(queryClient);
     } finally {
       setBusy(false);
     }
@@ -44,8 +47,7 @@ export default function Settings() {
       const { accountsUpdated } = await recalculateCreditAccountBalances(user);
       toast.success(`Recalculated ${accountsUpdated} credit account balance(s) from invoices`);
       queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-top-outstanding'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      invalidateDashboard(queryClient);
     } catch (err) {
       toast.error(err.message);
     } finally {

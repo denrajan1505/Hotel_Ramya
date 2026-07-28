@@ -18,6 +18,7 @@ const CreditAccounts = lazy(() => import('./pages/CreditAccounts/CreditAccounts'
 const ImportFOCashier = lazy(() => import('./pages/ImportFOCashier/ImportFOCashier'));
 const Invoices = lazy(() => import('./pages/Invoices/Invoices'));
 const Payments = lazy(() => import('./pages/Payments/Payments'));
+const BillMatching = lazy(() => import('./pages/BillMatching/BillMatching'));
 const Receipts = lazy(() => import('./pages/Receipts/Receipts'));
 const Adjustments = lazy(() => import('./pages/Adjustments/Adjustments'));
 const CustomerLedger = lazy(() => import('./pages/CustomerLedger/CustomerLedger'));
@@ -73,6 +74,14 @@ export default function App() {
                 element={
                   <ProtectedRoute permission="RECORD_PAYMENTS">
                     <Page><Payments /></Page>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/bill-matching"
+                element={
+                  <ProtectedRoute permission="ALLOCATE_PAYMENTS">
+                    <Page><BillMatching /></Page>
                   </ProtectedRoute>
                 }
               />

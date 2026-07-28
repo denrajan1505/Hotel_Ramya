@@ -9,8 +9,8 @@ import { listInvoices } from '../../services/invoiceService';
 import { CATEGORY_TABS } from '../../constants/categories';
 import { formatCurrency, daysBetween, agingBucket } from '../../utils/formatters';
 
-const BUCKETS = ['Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days'];
-const BUCKET_COLORS = [CHART_COLORS.success, CHART_COLORS.warning, '#f0942a', CHART_COLORS.danger, '#991b1b'];
+const BUCKETS = ['0-30 Days', '30-60 Days', '60-90 Days', 'Above 90 Days'];
+const BUCKET_COLORS = [CHART_COLORS.warning, '#f0942a', CHART_COLORS.danger, '#991b1b'];
 
 export default function AgingReport() {
   const { data: invoices, isLoading } = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });

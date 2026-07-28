@@ -11,6 +11,7 @@ import { listAdjustments, requestAdjustment, approveAdjustment, rejectAdjustment
 import { listInvoices } from '../../services/invoiceService';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 const TYPES = ['Write-off', 'Discount', 'Correction'];
 
@@ -29,6 +30,8 @@ export default function Adjustments() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['adjustments'] });
     queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+    invalidateDashboard(queryClient);
   };
 
   const submit = async (data) => {
