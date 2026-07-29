@@ -119,7 +119,7 @@ export default function Customers() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Customer' : 'New Customer'} size="lg">
         <form onSubmit={handleSubmit((data) => saveMutation.mutate(data))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="label">Customer Name *</label>
+            <label className="label">Company Name *</label>
             <input className="input" {...register('name', { required: true })} />
             {errors.name && <p className="mt-1 text-xs text-danger-500">Required</p>}
           </div>
