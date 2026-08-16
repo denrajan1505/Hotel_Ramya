@@ -15,6 +15,8 @@ import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
 
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 export default function Invoices() {
   const { user, can } = useAuth();
   const queryClient = useQueryClient();
@@ -121,12 +123,16 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPaymen
 
   const [paymentType, setPaymentType] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentAmount, setPaymentAmount] = useState(() => (invoice?.outstanding ?? 0).toFixed(2));
   const [utrInput, setUtrInput] = useState('');
   const [utrEdit, setUtrEdit] = useState(invoice?.utrNumber || '');
 
+  const amountValue = Number(paymentAmount);
+  const amountValid = amountValue > 0 && amountValue <= (invoice?.outstanding ?? 0) + 0.01;
+
   const settleMutation = useMutation({
     mutationFn: () =>
-      recordInvoicePayment({ invoice, paymentType, paymentDate: new Date(paymentDate), utrNumber: utrInput, user }),
+      recordInvoicePayment({ invoice, paymentType, paymentDate: new Date(paymentDate), amount: amountValue, utrNumber: utrInput, user }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
@@ -212,7 +218,19 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPaymen
       {invoice.outstanding > 0 ? (
         canRecordPayment ? (
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <div>
+                <label className="label">Amount</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={invoice.outstanding}
+                  className="input"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                />
+              </div>
               <div>
                 <label className="label">Payment Type</label>
                 <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
@@ -239,12 +257,22 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPaymen
                 />
               </div>
             </div>
+            {!amountValid && (
+              <p className="mt-2 text-xs text-danger-600">
+                Enter an amount between ₹0.01 and the outstanding balance of {formatCurrency(invoice.outstanding)}.
+              </p>
+            )}
+            {amountValid && amountValue < invoice.outstanding && (
+              <p className="mt-2 text-xs text-slate-400">
+                Partial payment — {formatCurrency(round2(invoice.outstanding - amountValue))} will remain outstanding.
+              </p>
+            )}
             <button
               className="btn-primary mt-3"
-              disabled={!paymentType || !paymentDate || settleMutation.isPending}
+              disabled={!paymentType || !paymentDate || !amountValid || settleMutation.isPending}
               onClick={() => settleMutation.mutate()}
             >
-              Record Payment — Settle {formatCurrency(invoice.outstanding)}
+              Record Payment — {formatCurrency(amountValue || 0)}
             </button>
           </div>
         ) : (

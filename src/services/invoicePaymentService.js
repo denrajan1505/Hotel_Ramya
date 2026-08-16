@@ -1,19 +1,21 @@
 import { doc, collection, getDocs, query, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
+import { deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
  * Settles a bill directly on the invoice itself — no separate Receipt or
- * Bill Matching step. Always pays off the full outstanding balance in one
- * shot (that's the point: enter the values, balance goes to zero). The UTR
- * number is optional here since it isn't always known on the day the payment
- * is received; leaving it blank still settles the bill, it just skips the
- * Journal Ledger entry until updateInvoiceUtr() is called later.
+ * Bill Matching step. Defaults to the full outstanding balance but accepts
+ * any amount up to it, so a partial payment leaves the remainder outstanding
+ * (status becomes "Partially Paid") instead of forcing the balance to zero.
+ * The UTR number is optional here since it isn't always known on the day the
+ * payment is received; leaving it blank still records the payment, it just
+ * skips the Journal Ledger entry until updateInvoiceUtr() is called later.
  */
-export async function recordInvoicePayment({ invoice, paymentType, paymentDate, utrNumber, user }) {
+export async function recordInvoicePayment({ invoice, paymentType, paymentDate, amount, utrNumber, user }) {
   if (!paymentType) throw new Error('Payment type is required.');
   if (!paymentDate) throw new Error('Payment date is required.');
 
@@ -21,17 +23,24 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
   const trimmedUtr = String(utrNumber || '').trim();
   const journalRef = trimmedUtr ? doc(collection(db, COLLECTIONS.JOURNAL_LEDGER)) : null;
 
-  const amount = await runTransaction(db, async (tx) => {
+  const settleAmount = await runTransaction(db, async (tx) => {
     const snap = await tx.get(invoiceRef);
     if (!snap.exists()) throw new Error('Invoice not found.');
     const inv = snap.data();
-    const settleAmount = round2(inv.outstanding);
-    if (settleAmount <= 0) throw new Error('This bill has no outstanding balance to settle.');
+    const outstanding = round2(inv.outstanding);
+    if (outstanding <= 0) throw new Error('This bill has no outstanding balance to settle.');
+
+    const requested = round2(amount);
+    if (!(requested > 0)) throw new Error('Enter an amount greater than zero.');
+    if (requested > outstanding + 0.01) throw new Error(`Amount can't exceed the outstanding balance of ${outstanding}.`);
+    const settleAmount = Math.min(requested, outstanding);
+    const newOutstanding = round2(outstanding - settleAmount);
+    const status = deriveInvoiceStatus(newOutstanding, inv.billAmount, inv.dueDate);
 
     tx.update(invoiceRef, {
       received: round2((inv.received || 0) + settleAmount),
-      outstanding: 0,
-      status: 'Paid',
+      outstanding: newOutstanding,
+      status,
       paymentType,
       paymentDate,
       paymentAmount: settleAmount,
@@ -71,7 +80,7 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
     module: 'Invoices',
     invoiceNumber: invoice.billNumber,
     utrNumber: trimmedUtr || null,
-    newValue: { amount, paymentType, paymentDate, utrNumber: trimmedUtr },
+    newValue: { amount: settleAmount, paymentType, paymentDate, utrNumber: trimmedUtr },
   });
 }
 
