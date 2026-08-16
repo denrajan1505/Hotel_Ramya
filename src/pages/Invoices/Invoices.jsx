@@ -96,8 +96,6 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
     enabled: Boolean(invoice),
   });
 
-  const isPortal = invoice?.category === 'Portal';
-
   const [paymentType, setPaymentType] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [paymentAmount, setPaymentAmount] = useState(() => (invoice?.outstanding ?? 0).toFixed(2));
@@ -126,7 +124,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
   const amountValue = Number(paymentAmount);
   const tdsValue = Number(tdsInput) || 0;
   const tcsValue = Number(tcsInput) || 0;
-  const commissionValue = isPortal ? Number(commissionInput) || 0 : 0;
+  const commissionValue = Number(commissionInput) || 0;
   const totalSettle = round2(amountValue + tdsValue + tcsValue + commissionValue);
   const amountValid = totalSettle > 0 && totalSettle <= (invoice?.outstanding ?? 0) + 0.01;
 
@@ -188,7 +186,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
         <Money label="Bill Amount" value={invoice.billAmount} />
         <Money label="Advance" value={invoice.advance} />
         <Money label="Received" value={invoice.received} />
-        {invoice.category === 'Portal' && <Money label="Commission" value={invoice.commission} />}
+        {invoice.commission > 0 && <Money label="Commission" value={invoice.commission} />}
         <Money label="TDS" value={invoice.tds} />
         <Money label="TCS" value={invoice.tcs} />
         {invoice.adjustment > 0 && <Money label="Adjustment" value={invoice.adjustment} />}
@@ -222,19 +220,17 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
                 <label className="label">TCS</label>
                 <input type="number" step="0.01" min="0" className="input" value={tcsInput} onChange={applyDeduction(setTcsInput)} />
               </div>
-              {isPortal && (
-                <div>
-                  <label className="label">Commission</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className="input"
-                    value={commissionInput}
-                    onChange={applyDeduction(setCommissionInput)}
-                  />
-                </div>
-              )}
+              <div>
+                <label className="label">Commission</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input"
+                  value={commissionInput}
+                  onChange={applyDeduction(setCommissionInput)}
+                />
+              </div>
               <div>
                 <label className="label">Payment Type</label>
                 <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
@@ -263,7 +259,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
             </div>
             {!amountValid && (
               <p className="mt-2 text-xs text-danger-600">
-                Amount + TDS + TCS{isPortal ? ' + Commission' : ''} must total between ₹0.01 and the outstanding balance of{' '}
+                Amount + TDS + TCS + Commission must total between ₹0.01 and the outstanding balance of{' '}
                 {formatCurrency(invoice.outstanding)}.
               </p>
             )}
