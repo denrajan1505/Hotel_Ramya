@@ -23,11 +23,11 @@ export default function Invoices() {
   const [selected, setSelected] = useState(null);
 
   const filtered = useMemo(() => {
-    // "All Bills" is the uncategorised inbox, not everything — once a bill is
-    // linked to a customer it moves into its category's own tab and drops
-    // out of here, so this tab empties out as categorisation catches up.
+    // "All Bills" is the uncategorised inbox, not everything — any bill with
+    // a real category (assigned at import or otherwise) belongs only in its
+    // own tab, not here too.
     if (activeTab === 'ALL') {
-      return (invoices || []).filter((inv) => !inv.customerId || inv.category === CATEGORIES.UNCLASSIFIED);
+      return (invoices || []).filter((inv) => !inv.category || inv.category === CATEGORIES.UNCLASSIFIED);
     }
     const tab = CATEGORY_TABS.find((t) => t.key === activeTab);
     return (invoices || []).filter((inv) => inv.category === tab.value);
