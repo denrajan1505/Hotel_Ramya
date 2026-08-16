@@ -4,6 +4,11 @@ import { exportCellValue } from './formatters';
 
 const BRAND = { primary: [10, 61, 145], gold: [212, 175, 55] };
 
+// jsPDF's built-in fonts have no glyph for ₹ (U+20B9) — it prints as a
+// garbled fallback character and throws off autoTable's column-width math.
+// Plain numbers read fine given the column headers already say "Amount".
+const stripRupeeSymbol = (value) => (typeof value === 'string' ? value.replace(/₹\s?/g, '') : value);
+
 export function exportTableToPdf({ title, subtitle, columns, rows, filename = 'report.pdf', orientation = 'landscape' }) {
   const doc = new jsPDF({ orientation, unit: 'pt' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -25,7 +30,7 @@ export function exportTableToPdf({ title, subtitle, columns, rows, filename = 'r
   autoTable(doc, {
     startY: 76,
     head: [columns.map((c) => c.header)],
-    body: rows.map((row) => columns.map((c) => exportCellValue(c, row))),
+    body: rows.map((row) => columns.map((c) => stripRupeeSymbol(exportCellValue(c, row)))),
     theme: 'striped',
     headStyles: { fillColor: BRAND.primary, textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [245, 248, 253] },
