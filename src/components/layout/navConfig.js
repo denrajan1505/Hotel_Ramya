@@ -1,39 +1,14 @@
-import {
-  LayoutDashboard,
-  Users,
-  Wallet,
-  UploadCloud,
-  FileText,
-  CreditCard,
-  Receipt,
-  SlidersHorizontal,
-  BookOpen,
-  TrendingUp,
-  AlertCircle,
-  FileSpreadsheet,
-  BarChart3,
-  UserCog,
-  Settings,
-  ScrollText,
-  GitMerge,
-} from 'lucide-react';
+import { LayoutDashboard, UploadCloud, FileText, TrendingUp, BookOpen } from 'lucide-react';
 
+// Trimmed down to the five pages actually used day to day. The other pages
+// (Customers, Payments, Bill Matching, Receipts, Settings, etc.) still exist
+// and still work — they're just not linked from the sidebar anymore, since
+// bill settlement now happens directly on Invoices and everything else was
+// unused clutter.
 export const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/customers', label: 'Customers', icon: Users, permission: 'MANAGE_CUSTOMERS' },
-  { to: '/credit-accounts', label: 'Credit Accounts', icon: Wallet },
   { to: '/import-fo-cashier', label: 'Import FO Cashier Report', icon: UploadCloud, permission: 'IMPORT_FO_REPORT' },
   { to: '/invoices', label: 'Invoices', icon: FileText },
-  { to: '/payments', label: 'Payments', icon: CreditCard, permission: 'RECORD_PAYMENTS' },
-  { to: '/bill-matching', label: 'Bill Matching', icon: GitMerge, permission: 'ALLOCATE_PAYMENTS' },
-  { to: '/receipts', label: 'Receipts', icon: Receipt },
-  { to: '/adjustments', label: 'Adjustments', icon: SlidersHorizontal },
-  { to: '/customer-ledger', label: 'Customer Ledger', icon: BookOpen },
   { to: '/aging-report', label: 'Aging Report', icon: TrendingUp },
-  { to: '/outstanding-report', label: 'Outstanding Report', icon: AlertCircle },
-  { to: '/statements', label: 'Statements', icon: FileSpreadsheet },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/audit-logs', label: 'Audit Logs', icon: ScrollText, permission: 'VIEW_AUDIT_LOGS' },
-  { to: '/user-management', label: 'User Management', icon: UserCog, permission: 'MANAGE_USERS' },
-  { to: '/settings', label: 'Settings', icon: Settings, permission: 'MANAGE_SETTINGS' },
+  { to: '/journal-ledger', label: 'Journal Ledger', icon: BookOpen },
 ];

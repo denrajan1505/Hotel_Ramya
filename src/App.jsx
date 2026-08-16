@@ -23,6 +23,7 @@ const Receipts = lazy(() => import('./pages/Receipts/Receipts'));
 const Adjustments = lazy(() => import('./pages/Adjustments/Adjustments'));
 const CustomerLedger = lazy(() => import('./pages/CustomerLedger/CustomerLedger'));
 const AgingReport = lazy(() => import('./pages/AgingReport/AgingReport'));
+const JournalLedger = lazy(() => import('./pages/JournalLedger/JournalLedger'));
 const OutstandingReport = lazy(() => import('./pages/OutstandingReport/OutstandingReport'));
 const Statements = lazy(() => import('./pages/Statements/Statements'));
 const Reports = lazy(() => import('./pages/Reports/Reports'));
@@ -89,6 +90,7 @@ export default function App() {
               <Route path="/adjustments" element={<Page><Adjustments /></Page>} />
               <Route path="/customer-ledger" element={<Page><CustomerLedger /></Page>} />
               <Route path="/aging-report" element={<Page><AgingReport /></Page>} />
+              <Route path="/journal-ledger" element={<Page><JournalLedger /></Page>} />
               <Route path="/outstanding-report" element={<Page><OutstandingReport /></Page>} />
               <Route path="/statements" element={<Page><Statements /></Page>} />
               <Route path="/reports" element={<Page><Reports /></Page>} />

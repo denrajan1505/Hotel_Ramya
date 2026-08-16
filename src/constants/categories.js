@@ -7,13 +7,15 @@ export const CATEGORIES = {
   UNCLASSIFIED: 'Unclassified',
 };
 
+// "ALL" is special-cased in Invoices.jsx to mean "not yet categorised" (the
+// inbox) rather than "everything" — once a bill is linked to a customer it
+// moves into its category's own tab and drops out of here.
 export const CATEGORY_TABS = [
   { key: 'ALL', label: 'All Bills', value: null },
   { key: 'COMPANY', label: 'Company', value: CATEGORIES.COMPANY },
   { key: 'INDIVIDUAL', label: 'Individual', value: CATEGORIES.INDIVIDUAL },
   { key: 'PORTAL', label: 'Portals', value: CATEGORIES.PORTAL },
   { key: 'TRAVEL', label: 'Travels', value: CATEGORIES.TRAVEL },
-  { key: 'UNCLASSIFIED', label: 'Unclassified', value: CATEGORIES.UNCLASSIFIED },
 ];
 
 // Seed data used the first time the Customer Master is empty, matching the
@@ -55,3 +57,6 @@ export const INVOICE_STATUS = {
 };
 
 export const PAYMENT_MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Card', 'Credit Card', 'Razorpay', 'Cheque', 'Cash', 'Cash Deposit', 'Other'];
+
+// Payment types offered when settling a bill directly on the Invoices page.
+export const PAYMENT_TYPES = ['NEFT', 'Cash', 'UPI', 'Google Pay', 'Card'];

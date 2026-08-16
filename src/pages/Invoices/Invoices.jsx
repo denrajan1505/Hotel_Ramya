@@ -8,10 +8,12 @@ import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
 import { listInvoices, linkInvoiceToCustomer } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
+import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
 import { listCustomers } from '../../services/customerService';
-import { CATEGORY_TABS } from '../../constants/categories';
+import { CATEGORIES, CATEGORY_TABS, PAYMENT_TYPES } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
+import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 export default function Invoices() {
   const { user, can } = useAuth();
@@ -36,8 +38,13 @@ export default function Invoices() {
   });
 
   const filtered = useMemo(() => {
+    // "All Bills" is the uncategorised inbox, not everything — once a bill is
+    // linked to a customer it moves into its category's own tab and drops
+    // out of here, so this tab empties out as categorisation catches up.
+    if (activeTab === 'ALL') {
+      return (invoices || []).filter((inv) => !inv.customerId || inv.category === CATEGORIES.UNCLASSIFIED);
+    }
     const tab = CATEGORY_TABS.find((t) => t.key === activeTab);
-    if (!tab?.value) return invoices || [];
     return (invoices || []).filter((inv) => inv.category === tab.value);
   }, [invoices, activeTab]);
 
@@ -78,23 +85,29 @@ export default function Invoices() {
           { key: 'tds', header: 'TDS', align: 'right', render: (r) => formatCurrency(r.tds) },
           { key: 'adjustment', header: 'Discount', align: 'right', render: (r) => formatCurrency(r.adjustment) },
           { key: 'outstanding', header: 'Balance', align: 'right', render: (r) => formatCurrency(r.outstanding) },
-          { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
+          { key: 'paymentType', header: 'Payment Type', render: (r) => r.paymentType || '—' },
+          { key: 'paymentDate', header: 'Payment Date', render: (r) => (r.paymentDate ? formatDate(r.paymentDate) : '—') },
+          { key: 'utrNumber', header: 'UTR Number', render: (r) => r.utrNumber || '—' },
           { key: 'status', header: 'Status', render: (r) => <StatusBadge value={r.status} /> },
         ]}
       />
 
       <InvoiceDetailModal
+        key={selected?.id}
         invoice={selected}
         onClose={() => setSelected(null)}
         canEditCategory={canEditCategory}
+        canRecordPayment={can('RECORD_PAYMENTS')}
         onCustomerChange={(customer) => linkMutation.mutate({ invoice: selected, customer })}
         linkPending={linkMutation.isPending}
+        user={user}
       />
     </div>
   );
 }
 
-function InvoiceDetailModal({ invoice, onClose, canEditCategory, onCustomerChange, linkPending }) {
+function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPayment, onCustomerChange, linkPending, user }) {
+  const queryClient = useQueryClient();
   const { data: allocations } = useQuery({
     queryKey: ['invoice-allocations', invoice?.id],
     queryFn: () => listPaymentAllocationsForInvoice(invoice.id),
@@ -104,6 +117,34 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, onCustomerChang
     queryKey: ['customers'],
     queryFn: listCustomers,
     enabled: Boolean(invoice) && canEditCategory,
+  });
+
+  const [paymentType, setPaymentType] = useState('');
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [utrInput, setUtrInput] = useState('');
+  const [utrEdit, setUtrEdit] = useState(invoice?.utrNumber || '');
+
+  const settleMutation = useMutation({
+    mutationFn: () =>
+      recordInvoicePayment({ invoice, paymentType, paymentDate: new Date(paymentDate), utrNumber: utrInput, user }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
+      invalidateDashboard(queryClient);
+      toast.success('Payment recorded — balance settled.');
+      onClose();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const utrMutation = useMutation({
+    mutationFn: () => updateInvoiceUtr({ invoice, utrNumber: utrEdit, user }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
+      toast.success('UTR saved — journal entry created.');
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   if (!invoice) return null;
@@ -167,33 +208,100 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, onCustomerChang
         <Money label="Outstanding" value={invoice.outstanding} highlight />
       </div>
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment History</h4>
-      <div className="table-shell">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/70 dark:border-white/10 dark:bg-white/5">
-              <th className="px-4 py-2 text-xs font-semibold uppercase text-slate-500">Amount Adjusted</th>
-              <th className="px-4 py-2 text-xs font-semibold uppercase text-slate-500">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(allocations || []).length === 0 ? (
-              <tr>
-                <td colSpan={2} className="px-4 py-6 text-center text-sm text-slate-400">
-                  No payments recorded yet.
-                </td>
+      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment</h4>
+      {invoice.outstanding > 0 ? (
+        canRecordPayment ? (
+          <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label className="label">Payment Type</label>
+                <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
+                  <option value="">Select…</option>
+                  {PAYMENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Payment Date</label>
+                <input type="date" className="input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">UTR Number</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Leave blank — add later"
+                  value={utrInput}
+                  onChange={(e) => setUtrInput(e.target.value)}
+                />
+              </div>
+            </div>
+            <button
+              className="btn-primary mt-3"
+              disabled={!paymentType || !paymentDate || settleMutation.isPending}
+              onClick={() => settleMutation.mutate()}
+            >
+              Record Payment — Settle {formatCurrency(invoice.outstanding)}
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">No payment recorded yet.</p>
+        )
+      ) : invoice.paymentType ? (
+        <div className="rounded-xl bg-slate-50 p-4 text-sm dark:bg-white/5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Field label="Payment Type" value={invoice.paymentType} />
+            <Field label="Payment Date" value={formatDate(invoice.paymentDate)} />
+            <Field label="Amount Settled" value={formatCurrency(invoice.paymentAmount)} />
+          </div>
+          <div className="mt-3">
+            <label className="label">UTR Number</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                className="input max-w-xs"
+                placeholder="Enter UTR from bank statement"
+                value={utrEdit}
+                onChange={(e) => setUtrEdit(e.target.value)}
+              />
+              {canRecordPayment && (
+                <button
+                  className="btn-outline !px-3 !py-1.5 text-xs"
+                  disabled={utrMutation.isPending || !utrEdit.trim()}
+                  onClick={() => utrMutation.mutate()}
+                >
+                  {invoice.utrNumber ? 'Update UTR' : 'Save UTR'}
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">Saving a UTR number creates its entry in the Journal Ledger.</p>
+          </div>
+        </div>
+      ) : (allocations || []).length > 0 ? (
+        <div className="table-shell">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/70 dark:border-white/10 dark:bg-white/5">
+                <th className="px-4 py-2 text-xs font-semibold uppercase text-slate-500">Amount Adjusted</th>
+                <th className="px-4 py-2 text-xs font-semibold uppercase text-slate-500">Date</th>
               </tr>
-            ) : (
-              allocations.map((a) => (
+            </thead>
+            <tbody>
+              {allocations.map((a) => (
                 <tr key={a.id} className="border-b border-slate-50 dark:border-white/5">
                   <td className="px-4 py-2">{formatCurrency(a.amountAdjusted)}</td>
                   <td className="px-4 py-2">{formatDate(a.createdAt)}</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-400">No payment recorded yet.</p>
+      )}
     </Modal>
   );
 }

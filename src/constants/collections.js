@@ -9,6 +9,7 @@ export const COLLECTIONS = {
   PAYMENT_ALLOCATIONS: 'paymentAllocations',
   RECEIPTS: 'receipts',
   RECEIPT_ALLOCATIONS: 'receiptAllocations',
+  JOURNAL_LEDGER: 'journalLedger',
   ADJUSTMENTS: 'adjustments',
   DEPARTMENTS: 'departments',
   AUDIT_LOGS: 'auditLogs',
