@@ -1,4 +1,4 @@
-import { doc, setDoc, deleteDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, getDocs, collection, query, where, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { crudFor, orderBy } from './firestoreCrud';
 import { COLLECTIONS } from '../constants/collections';
@@ -79,6 +79,15 @@ export async function createCustomer(data, user) {
   return id;
 }
 
+/**
+ * Category/name are copied onto each invoice at link time (see
+ * linkInvoiceToCustomer) rather than looked up live, so editing a customer
+ * here would otherwise leave every already-linked invoice showing the old,
+ * possibly-wrong category forever — the exact bug that made "MakeMyTrip"
+ * bills stuck under Company un-fixable even after re-picking the right
+ * customer. Cascade the change to every invoice already linked to this
+ * customer so the two can't drift apart again.
+ */
 export async function updateCustomer(id, data, user) {
   const before = await customers.get(id);
   await customers.update(id, data);
@@ -92,6 +101,16 @@ export async function updateCustomer(id, data, user) {
       { merge: true },
     );
   }
+
+  if (data.category !== before?.category || data.name !== before?.name) {
+    const linkedInvoices = await getDocs(query(collection(db, COLLECTIONS.INVOICES), where('customerId', '==', id)));
+    if (!linkedInvoices.empty) {
+      const batch = writeBatch(db);
+      linkedInvoices.docs.forEach((d) => batch.update(d.ref, { category: data.category, customerName: data.name }));
+      await batch.commit();
+    }
+  }
+
   await logAudit({ user, action: 'Customer Updated', module: 'Customers', oldValue: before, newValue: data });
 }
 

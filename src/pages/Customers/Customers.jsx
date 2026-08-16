@@ -46,6 +46,7 @@ export default function Customers() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
       invalidateDashboard(queryClient);
       toast.success(editing ? 'Customer updated' : 'Customer created');
       setModalOpen(false);
