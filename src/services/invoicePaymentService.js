@@ -8,14 +8,20 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
  * Settles a bill directly on the invoice itself — no separate Receipt or
- * Bill Matching step. Defaults to the full outstanding balance but accepts
- * any amount up to it, so a partial payment leaves the remainder outstanding
- * (status becomes "Partially Paid") instead of forcing the balance to zero.
- * The UTR number is optional here since it isn't always known on the day the
- * payment is received; leaving it blank still records the payment, it just
- * skips the Journal Ledger entry until updateInvoiceUtr() is called later.
+ * Bill Matching step. `amount` is the actual cash/bank credit; tds/tcs/
+ * commission are the deducted-at-source portions (commission mainly applies
+ * to Portal bills) that also count against the outstanding balance per the
+ * spec formula in balanceCalculations.js. Together they default to covering
+ * the full outstanding balance, but any total up to it is accepted, so a
+ * partial payment leaves the remainder outstanding ("Partially Paid") instead
+ * of forcing the balance to zero. The UTR number is optional here since it
+ * isn't always known on the day the payment is received; leaving it blank
+ * still records the payment, it just skips the Journal Ledger entry until
+ * updateInvoiceUtr() is called later. The Journal Ledger amount is the cash
+ * portion only (`amount`), since that's what the bank statement/UTR actually
+ * reconciles against — TDS/TCS/commission never hit the bank.
  */
-export async function recordInvoicePayment({ invoice, paymentType, paymentDate, amount, utrNumber, user }) {
+export async function recordInvoicePayment({ invoice, paymentType, paymentDate, amount, tds, tcs, commission, utrNumber, user }) {
   if (!paymentType) throw new Error('Payment type is required.');
   if (!paymentDate) throw new Error('Payment date is required.');
 
@@ -23,22 +29,28 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
   const trimmedUtr = String(utrNumber || '').trim();
   const journalRef = trimmedUtr ? doc(collection(db, COLLECTIONS.JOURNAL_LEDGER)) : null;
 
-  const settleAmount = await runTransaction(db, async (tx) => {
+  const result = await runTransaction(db, async (tx) => {
     const snap = await tx.get(invoiceRef);
     if (!snap.exists()) throw new Error('Invoice not found.');
     const inv = snap.data();
     const outstanding = round2(inv.outstanding);
     if (outstanding <= 0) throw new Error('This bill has no outstanding balance to settle.');
 
-    const requested = round2(amount);
-    if (!(requested > 0)) throw new Error('Enter an amount greater than zero.');
-    if (requested > outstanding + 0.01) throw new Error(`Amount can't exceed the outstanding balance of ${outstanding}.`);
-    const settleAmount = Math.min(requested, outstanding);
+    const receivedAmount = round2(amount);
+    const tdsAmount = round2(tds);
+    const tcsAmount = round2(tcs);
+    const commissionAmount = round2(commission);
+    const settleAmount = round2(receivedAmount + tdsAmount + tcsAmount + commissionAmount);
+    if (!(settleAmount > 0)) throw new Error('Enter an amount greater than zero.');
+    if (settleAmount > outstanding + 0.01) throw new Error(`Amount, TDS, TCS and Commission together can't exceed the outstanding balance of ${outstanding}.`);
     const newOutstanding = round2(outstanding - settleAmount);
     const status = deriveInvoiceStatus(newOutstanding, inv.billAmount, inv.dueDate);
 
     tx.update(invoiceRef, {
-      received: round2((inv.received || 0) + settleAmount),
+      received: round2((inv.received || 0) + receivedAmount),
+      tds: round2((inv.tds || 0) + tdsAmount),
+      tcs: round2((inv.tcs || 0) + tcsAmount),
+      commission: round2((inv.commission || 0) + commissionAmount),
       outstanding: newOutstanding,
       status,
       paymentType,
@@ -64,14 +76,14 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
         customerName: inv.customerName || 'Unknown',
         paymentType,
         paymentDate,
-        amount: settleAmount,
+        amount: receivedAmount,
         createdBy: user?.uid || null,
         createdByName: user?.displayName || user?.username || 'System',
         createdAt: serverTimestamp(),
       });
     }
 
-    return settleAmount;
+    return { settleAmount, receivedAmount, tdsAmount, tcsAmount, commissionAmount };
   });
 
   await logAudit({
@@ -80,7 +92,7 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
     module: 'Invoices',
     invoiceNumber: invoice.billNumber,
     utrNumber: trimmedUtr || null,
-    newValue: { amount: settleAmount, paymentType, paymentDate, utrNumber: trimmedUtr },
+    newValue: { ...result, paymentType, paymentDate, utrNumber: trimmedUtr },
   });
 }
 

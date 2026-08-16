@@ -96,18 +96,53 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
     enabled: Boolean(invoice),
   });
 
+  const isPortal = invoice?.category === 'Portal';
+
   const [paymentType, setPaymentType] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [paymentAmount, setPaymentAmount] = useState(() => (invoice?.outstanding ?? 0).toFixed(2));
+  const [amountTouched, setAmountTouched] = useState(false);
+  const [tdsInput, setTdsInput] = useState('0');
+  const [tcsInput, setTcsInput] = useState('0');
+  const [commissionInput, setCommissionInput] = useState('0');
   const [utrInput, setUtrInput] = useState('');
   const [utrEdit, setUtrEdit] = useState(invoice?.utrNumber || '');
 
+  // Amount auto-fills with "outstanding minus deductions" so entering TDS/TCS/
+  // Commission (deducted at source, never hits the bank) narrows down to the
+  // actual cash received — until the admin edits Amount directly themselves.
+  const applyDeduction = (setter) => (e) => {
+    const value = e.target.value;
+    setter(value);
+    if (!amountTouched) {
+      const outstanding = invoice?.outstanding ?? 0;
+      const tds = setter === setTdsInput ? Number(value) : Number(tdsInput);
+      const tcs = setter === setTcsInput ? Number(value) : Number(tcsInput);
+      const commission = setter === setCommissionInput ? Number(value) : Number(commissionInput);
+      setPaymentAmount(round2(Math.max(0, outstanding - tds - tcs - commission)).toFixed(2));
+    }
+  };
+
   const amountValue = Number(paymentAmount);
-  const amountValid = amountValue > 0 && amountValue <= (invoice?.outstanding ?? 0) + 0.01;
+  const tdsValue = Number(tdsInput) || 0;
+  const tcsValue = Number(tcsInput) || 0;
+  const commissionValue = isPortal ? Number(commissionInput) || 0 : 0;
+  const totalSettle = round2(amountValue + tdsValue + tcsValue + commissionValue);
+  const amountValid = totalSettle > 0 && totalSettle <= (invoice?.outstanding ?? 0) + 0.01;
 
   const settleMutation = useMutation({
     mutationFn: () =>
-      recordInvoicePayment({ invoice, paymentType, paymentDate: new Date(paymentDate), amount: amountValue, utrNumber: utrInput, user }),
+      recordInvoicePayment({
+        invoice,
+        paymentType,
+        paymentDate: new Date(paymentDate),
+        amount: amountValue,
+        tds: tdsValue,
+        tcs: tcsValue,
+        commission: commissionValue,
+        utrNumber: utrInput,
+        user,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
@@ -166,17 +201,40 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
               <div>
-                <label className="label">Amount</label>
+                <label className="label">Amount Received</label>
                 <input
                   type="number"
                   step="0.01"
-                  min="0.01"
-                  max={invoice.outstanding}
+                  min="0"
                   className="input"
                   value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  onChange={(e) => {
+                    setAmountTouched(true);
+                    setPaymentAmount(e.target.value);
+                  }}
                 />
               </div>
+              <div>
+                <label className="label">TDS</label>
+                <input type="number" step="0.01" min="0" className="input" value={tdsInput} onChange={applyDeduction(setTdsInput)} />
+              </div>
+              <div>
+                <label className="label">TCS</label>
+                <input type="number" step="0.01" min="0" className="input" value={tcsInput} onChange={applyDeduction(setTcsInput)} />
+              </div>
+              {isPortal && (
+                <div>
+                  <label className="label">Commission</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input"
+                    value={commissionInput}
+                    onChange={applyDeduction(setCommissionInput)}
+                  />
+                </div>
+              )}
               <div>
                 <label className="label">Payment Type</label>
                 <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
@@ -205,12 +263,13 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
             </div>
             {!amountValid && (
               <p className="mt-2 text-xs text-danger-600">
-                Enter an amount between ₹0.01 and the outstanding balance of {formatCurrency(invoice.outstanding)}.
+                Amount + TDS + TCS{isPortal ? ' + Commission' : ''} must total between ₹0.01 and the outstanding balance of{' '}
+                {formatCurrency(invoice.outstanding)}.
               </p>
             )}
-            {amountValid && amountValue < invoice.outstanding && (
+            {amountValid && totalSettle < invoice.outstanding && (
               <p className="mt-2 text-xs text-slate-400">
-                Partial payment — {formatCurrency(round2(invoice.outstanding - amountValue))} will remain outstanding.
+                Partial payment — {formatCurrency(round2(invoice.outstanding - totalSettle))} will remain outstanding.
               </p>
             )}
             <button
@@ -218,7 +277,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
               disabled={!paymentType || !paymentDate || !amountValid || settleMutation.isPending}
               onClick={() => settleMutation.mutate()}
             >
-              Record Payment — {formatCurrency(amountValue || 0)}
+              Record Payment — {formatCurrency(totalSettle || 0)}
             </button>
           </div>
         ) : (
