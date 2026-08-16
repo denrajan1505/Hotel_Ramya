@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { exportCellValue } from './formatters';
 
 const BRAND = { primary: [10, 61, 145], gold: [212, 175, 55] };
 
@@ -24,7 +25,7 @@ export function exportTableToPdf({ title, subtitle, columns, rows, filename = 'r
   autoTable(doc, {
     startY: 76,
     head: [columns.map((c) => c.header)],
-    body: rows.map((row) => columns.map((c) => row[c.key] ?? '')),
+    body: rows.map((row) => columns.map((c) => exportCellValue(c, row))),
     theme: 'striped',
     headStyles: { fillColor: BRAND.primary, textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [245, 248, 253] },

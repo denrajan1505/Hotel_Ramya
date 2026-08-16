@@ -59,6 +59,18 @@ export function agingBucket(overdueDays) {
   return 'Above 90 Days';
 }
 
+// Excel/PDF export shouldn't dump raw field values (Firestore Timestamps,
+// etc.) — prefer a column's display render() when it yields plain text, since
+// that's already been through formatDate/formatCurrency. Columns that render
+// JSX (badges) fall back to the raw field, which is plain text anyway.
+export function exportCellValue(col, row) {
+  if (col.render) {
+    const rendered = col.render(row);
+    if (typeof rendered === 'string' || typeof rendered === 'number') return rendered;
+  }
+  return row[col.key] ?? '';
+}
+
 export function initials(name = '') {
   return name
     .split(' ')

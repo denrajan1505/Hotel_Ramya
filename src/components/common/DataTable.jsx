@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import Loader from './Loader';
 import { exportToExcel } from '../../utils/excelExport';
 import { exportTableToPdf } from '../../utils/pdfExport';
+import { exportCellValue } from '../../utils/formatters';
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
@@ -60,7 +61,7 @@ export default function DataTable({
   };
 
   const handleExportExcel = () => {
-    const data = sorted.map((row) => Object.fromEntries(columns.map((c) => [c.header, row[c.key]])));
+    const data = sorted.map((row) => Object.fromEntries(columns.map((c) => [c.header, exportCellValue(c, row)])));
     exportToExcel(data, `${exportFilename}.xlsx`);
   };
 
