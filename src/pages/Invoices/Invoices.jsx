@@ -6,10 +6,9 @@ import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
-import { listInvoices, linkInvoiceToCustomer } from '../../services/invoiceService';
+import { listInvoices } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
-import { listCustomers } from '../../services/customerService';
 import { CATEGORIES, CATEGORY_TABS, PAYMENT_TYPES } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -23,21 +22,6 @@ export default function Invoices() {
   const { data: invoices, isLoading } = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });
   const [activeTab, setActiveTab] = useState('ALL');
   const [selected, setSelected] = useState(null);
-
-  const canEditCategory = can('MANAGE_INVOICE_CATEGORY');
-
-  const linkMutation = useMutation({
-    mutationFn: ({ invoice, customer }) => linkInvoiceToCustomer(invoice.id, customer, user),
-    onSuccess: (_, { invoice, customer }) => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      const patch = customer
-        ? { customerId: customer.id, customerName: customer.name, category: customer.category }
-        : { customerId: null, category: 'Unclassified' };
-      setSelected((prev) => (prev && prev.id === invoice.id ? { ...prev, ...patch } : prev));
-      toast.success(customer ? `Category corrected to ${customer.category} (${customer.name})` : 'Invoice unlinked from customer');
-    },
-    onError: (err) => toast.error(err.message),
-  });
 
   const filtered = useMemo(() => {
     // "All Bills" is the uncategorised inbox, not everything — any bill with
@@ -98,27 +82,19 @@ export default function Invoices() {
         key={selected?.id}
         invoice={selected}
         onClose={() => setSelected(null)}
-        canEditCategory={canEditCategory}
         canRecordPayment={can('RECORD_PAYMENTS')}
-        onCustomerChange={(customer) => linkMutation.mutate({ invoice: selected, customer })}
-        linkPending={linkMutation.isPending}
         user={user}
       />
     </div>
   );
 }
 
-function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPayment, onCustomerChange, linkPending, user }) {
+function InvoiceDetailModal({ invoice, onClose, canRecordPayment, user }) {
   const queryClient = useQueryClient();
   const { data: allocations } = useQuery({
     queryKey: ['invoice-allocations', invoice?.id],
     queryFn: () => listPaymentAllocationsForInvoice(invoice.id),
     enabled: Boolean(invoice),
-  });
-  const { data: customers } = useQuery({
-    queryKey: ['customers'],
-    queryFn: listCustomers,
-    enabled: Boolean(invoice) && canEditCategory,
   });
 
   const [paymentType, setPaymentType] = useState('');
@@ -193,36 +169,6 @@ function InvoiceDetailModal({ invoice, onClose, canEditCategory, canRecordPaymen
       <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
         <Field label="Guest Name" value={invoice.guestName} />
         <Field label="Company (from bill)" value={invoice.companyName || '—'} />
-        <div className="sm:col-span-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Category</p>
-          {canEditCategory ? (
-            <>
-              <select
-                className="input mt-0.5 !py-1.5 !text-sm"
-                value={invoice.customerId || ''}
-                disabled={linkPending}
-                onChange={(e) => {
-                  const customer = (customers || []).find((c) => c.id === e.target.value);
-                  onCustomerChange(customer || null);
-                }}
-              >
-                <option value="">— Unclassified —</option>
-                {(customers || []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.category})
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-slate-400">
-                If import picked the wrong category, choose the correct customer here to fix it.
-              </p>
-            </>
-          ) : (
-            <p className="mt-0.5">
-              <StatusBadge value={invoice.category} />
-            </p>
-          )}
-        </div>
         <Field label="Room No" value={invoice.roomNumber} />
         <Field label="Check-In" value={formatDate(invoice.checkInDate)} />
         <Field label="Check-Out" value={formatDate(invoice.checkOutDate)} />
