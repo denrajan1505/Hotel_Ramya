@@ -1,10 +1,24 @@
-import { doc, collection, getDocs, query, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
+import { doc, collection, getDocs, query, where, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+const sumBills = (bills) => round2(bills.reduce((total, b) => total + (Number(b.amount) || 0), 0));
+
+/**
+ * Same UTR = same bank credit, so every bill settled against it belongs on
+ * one Journal Ledger voucher instead of one row per bill. Looked up by query
+ * (not invoice.journalEntryId) so bills reconciled independently still find
+ * each other the moment they share a UTR.
+ */
+async function resolveJournalRef(utrNumber) {
+  const snap = await getDocs(query(collection(db, COLLECTIONS.JOURNAL_LEDGER), where('utrNumber', '==', utrNumber)));
+  if (!snap.empty) return snap.docs[0].ref;
+  return doc(collection(db, COLLECTIONS.JOURNAL_LEDGER));
+}
 
 /**
  * Settles a bill directly on the invoice itself — no separate Receipt or
@@ -27,11 +41,12 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
 
   const invoiceRef = doc(db, COLLECTIONS.INVOICES, invoice.id);
   const trimmedUtr = String(utrNumber || '').trim();
-  const journalRef = trimmedUtr ? doc(collection(db, COLLECTIONS.JOURNAL_LEDGER)) : null;
+  const journalRef = trimmedUtr ? await resolveJournalRef(trimmedUtr) : null;
 
   const result = await runTransaction(db, async (tx) => {
     const snap = await tx.get(invoiceRef);
     if (!snap.exists()) throw new Error('Invoice not found.');
+    const journalSnap = journalRef ? await tx.get(journalRef) : null;
     const inv = snap.data();
     const outstanding = round2(inv.outstanding);
     if (outstanding <= 0) throw new Error('This bill has no outstanding balance to settle.');
@@ -68,19 +83,28 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
     }
 
     if (journalRef) {
-      tx.set(journalRef, {
-        utrNumber: trimmedUtr,
+      const billLine = {
         invoiceId: invoice.id,
         billNumber: inv.billNumber,
         customerId: inv.customerId || null,
         customerName: inv.customerName || 'Unknown',
-        paymentType,
-        paymentDate,
         amount: receivedAmount,
-        createdBy: user?.uid || null,
-        createdByName: user?.displayName || user?.username || 'System',
-        createdAt: serverTimestamp(),
-      });
+      };
+      if (journalSnap?.exists()) {
+        const bills = [...(journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
+        tx.set(journalRef, { utrNumber: trimmedUtr, paymentType, paymentDate, bills, totalAmount: sumBills(bills), updatedAt: serverTimestamp() }, { merge: true });
+      } else {
+        tx.set(journalRef, {
+          utrNumber: trimmedUtr,
+          paymentType,
+          paymentDate,
+          bills: [billLine],
+          totalAmount: billLine.amount,
+          createdBy: user?.uid || null,
+          createdByName: user?.displayName || user?.username || 'System',
+          createdAt: serverTimestamp(),
+        });
+      }
     }
 
     return { settleAmount, receivedAmount, tdsAmount, tcsAmount, commissionAmount };
@@ -108,33 +132,54 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
   if (!invoice.paymentType || !invoice.paymentDate) throw new Error('Record the payment before adding a UTR number.');
 
   const invoiceRef = doc(db, COLLECTIONS.INVOICES, invoice.id);
-  const journalRef = invoice.journalEntryId
-    ? doc(db, COLLECTIONS.JOURNAL_LEDGER, invoice.journalEntryId)
-    : doc(collection(db, COLLECTIONS.JOURNAL_LEDGER));
+  const oldJournalRef = invoice.journalEntryId ? doc(db, COLLECTIONS.JOURNAL_LEDGER, invoice.journalEntryId) : null;
+  const utrChanged = Boolean(invoice.utrNumber) && invoice.utrNumber !== trimmedUtr;
+  // Reuse the same voucher on a no-op re-save; otherwise find (or create) the
+  // voucher for the new UTR so bills sharing it land on one entry.
+  const newJournalRef = !utrChanged && oldJournalRef ? oldJournalRef : await resolveJournalRef(trimmedUtr);
+  const detachOld = utrChanged && oldJournalRef && oldJournalRef.id !== newJournalRef.id;
 
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(invoiceRef);
     if (!snap.exists()) throw new Error('Invoice not found.');
     const inv = snap.data();
+    const oldSnap = detachOld ? await tx.get(oldJournalRef) : null;
+    const newSnap = await tx.get(newJournalRef);
 
-    tx.update(invoiceRef, { utrNumber: trimmedUtr, journalEntryId: journalRef.id });
-    tx.set(
-      journalRef,
-      {
+    if (detachOld && oldSnap?.exists()) {
+      const remainingBills = (oldSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id);
+      if (remainingBills.length) {
+        tx.set(oldJournalRef, { bills: remainingBills, totalAmount: sumBills(remainingBills), updatedAt: serverTimestamp() }, { merge: true });
+      } else {
+        tx.delete(oldJournalRef);
+      }
+    }
+
+    const billLine = {
+      invoiceId: invoice.id,
+      billNumber: inv.billNumber,
+      customerId: inv.customerId || null,
+      customerName: inv.customerName || 'Unknown',
+      amount: round2(inv.paymentAmount || 0),
+    };
+
+    if (newSnap.exists()) {
+      const bills = [...(newSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
+      tx.set(newJournalRef, { utrNumber: trimmedUtr, paymentType: inv.paymentType, paymentDate: inv.paymentDate, bills, totalAmount: sumBills(bills), updatedAt: serverTimestamp() }, { merge: true });
+    } else {
+      tx.set(newJournalRef, {
         utrNumber: trimmedUtr,
-        invoiceId: invoice.id,
-        billNumber: inv.billNumber,
-        customerId: inv.customerId || null,
-        customerName: inv.customerName || 'Unknown',
         paymentType: inv.paymentType,
         paymentDate: inv.paymentDate,
-        amount: inv.paymentAmount || 0,
+        bills: [billLine],
+        totalAmount: billLine.amount,
         createdBy: user?.uid || null,
         createdByName: user?.displayName || user?.username || 'System',
         createdAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+      });
+    }
+
+    tx.update(invoiceRef, { utrNumber: trimmedUtr, journalEntryId: newJournalRef.id });
   });
 
   await logAudit({
