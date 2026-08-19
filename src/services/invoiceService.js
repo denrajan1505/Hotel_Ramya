@@ -102,6 +102,32 @@ export async function linkInvoiceToCustomer(id, customer, user) {
   });
 }
 
+/**
+ * Sets a bill's category to one of the four buckets directly (or back to
+ * Unclassified), independent of Customer Master — this is plain bucketing,
+ * not the customer-linking flow in linkInvoiceToCustomer. A bill categorised
+ * this way has no customerId, so it stays invisible to Bill Matching,
+ * Customer Ledger and per-customer credit-balance totals, all of which
+ * filter strictly by customerId; use linkInvoiceToCustomer instead when
+ * those need to see the bill.
+ */
+export async function setInvoiceCategory(id, category, user) {
+  const before = await invoices.get(id);
+  const totals = { received: before?.received, tds: before?.tds, tcs: before?.tcs, commission: before?.commission, adjustment: before?.adjustment };
+  const outstanding = calculateOutstanding({ ...before, category }, totals);
+  const status = deriveInvoiceStatus(outstanding, before?.billAmount, before?.dueDate);
+  const data = { category, outstanding, status };
+  await invoices.update(id, data);
+  await logAudit({
+    user,
+    action: 'Invoice Category Set',
+    module: 'Invoices',
+    oldValue: before,
+    newValue: data,
+    invoiceNumber: before?.billNumber,
+  });
+}
+
 export async function deleteInvoice(id, user) {
   const before = await invoices.get(id);
   await invoices.remove(id);

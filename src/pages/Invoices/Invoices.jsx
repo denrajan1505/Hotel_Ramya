@@ -6,8 +6,7 @@ import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
-import { listInvoices, linkInvoiceToCustomer } from '../../services/invoiceService';
-import { listCustomers } from '../../services/customerService';
+import { listInvoices, setInvoiceCategory } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
 import { CATEGORIES, CATEGORY_TABS, PAYMENT_TYPES } from '../../constants/categories';
@@ -98,15 +97,12 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
     queryFn: () => listPaymentAllocationsForInvoice(invoice.id),
     enabled: Boolean(invoice),
   });
-  const { data: customers } = useQuery({ queryKey: ['customers'], queryFn: listCustomers, enabled: Boolean(invoice) });
+  const [category, setCategory] = useState(invoice?.category || CATEGORIES.UNCLASSIFIED);
 
-  const [customerId, setCustomerId] = useState(invoice?.customerId || '');
-
-  const linkMutation = useMutation({
-    mutationFn: () => linkInvoiceToCustomer(invoice.id, customers?.find((c) => c.id === customerId) || null, user),
+  const categoryMutation = useMutation({
+    mutationFn: () => setInvoiceCategory(invoice.id, category, user),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
-      queryClient.invalidateQueries({ queryKey: ['credit-accounts'] });
       invalidateDashboard(queryClient);
       toast.success('Bill categorised.');
       onClose();
@@ -194,7 +190,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         <Field label="Status" value={<StatusBadge value={invoice.status} />} />
       </div>
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Customer / Category</h4>
+      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Category</h4>
       <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
         <div className="flex flex-wrap items-center gap-2">
           <Field label="Current Category" value={<StatusBadge value={invoice.category || CATEGORIES.UNCLASSIFIED} />} />
@@ -202,20 +198,19 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         {canManageCategory && (
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <div className="min-w-[16rem]">
-              <label className="label">Link to Customer</label>
-              <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                <option value="">Unclassified</option>
-                {(customers || []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.category})
-                  </option>
-                ))}
+              <label className="label">Category</label>
+              <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value={CATEGORIES.UNCLASSIFIED}>Unclassified</option>
+                <option value={CATEGORIES.COMPANY}>Company</option>
+                <option value={CATEGORIES.INDIVIDUAL}>Individual</option>
+                <option value={CATEGORIES.PORTAL}>Portal</option>
+                <option value={CATEGORIES.TRAVEL}>Travel</option>
               </select>
             </div>
             <button
               className="btn-primary !px-3 !py-1.5 text-xs"
-              disabled={linkMutation.isPending || (customerId || '') === (invoice.customerId || '')}
-              onClick={() => linkMutation.mutate()}
+              disabled={categoryMutation.isPending || category === (invoice.category || CATEGORIES.UNCLASSIFIED)}
+              onClick={() => categoryMutation.mutate()}
             >
               Save Category
             </button>
