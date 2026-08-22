@@ -8,14 +8,35 @@ import { formatCurrency, formatDate } from '../../utils/formatters';
 // Vouchers written before credit lines were introduced only carried fixed
 // totalAmount/totalTds/totalTcs/totalCommission fields (all Cr Bank/NEFT and
 // deductions). Rebuilt here into the same {label, amount} shape as
-// entry.creditTotals so older entries still render correctly.
+// entry.creditTotals so older entries still render correctly. Even older
+// entries (from before bills were batched into one voucher per UTR) have no
+// totals at all — just a flat top-level `amount` — so that's read too.
 function legacyCreditTotals(entry) {
   const out = [];
-  if (entry.totalAmount) out.push({ label: entry.paymentType || 'Bank/Cash', amount: entry.totalAmount });
+  const bankAmount = entry.totalAmount ?? entry.amount;
+  if (bankAmount) out.push({ label: entry.paymentType || 'Bank/Cash', amount: bankAmount });
   if (entry.totalTds) out.push({ label: 'TDS', amount: entry.totalTds });
   if (entry.totalTcs) out.push({ label: 'TCS', amount: entry.totalTcs });
   if (entry.totalCommission) out.push({ label: 'Commission', amount: entry.totalCommission });
   return out;
+}
+
+// The earliest vouchers predate the `bills` array entirely — one document
+// was one bill, with billNumber/customerId/customerName/amount stored flat
+// on the entry itself. Synthesized here into the same shape a `bills` array
+// entry takes so the rest of the render logic doesn't need to care.
+function legacyBills(entry) {
+  if (entry.bills) return entry.bills;
+  if (!entry.billNumber) return [];
+  return [
+    {
+      invoiceId: entry.invoiceId,
+      billNumber: entry.billNumber,
+      customerId: entry.customerId || null,
+      customerName: entry.customerName || 'Unknown',
+      debitAmount: entry.amount,
+    },
+  ];
 }
 
 // One row per voucher (one per UTR, or standalone for cash/GPay settlements
@@ -29,10 +50,10 @@ export default function JournalLedger() {
 
   const rows = useMemo(() => {
     return (entries || []).map((entry) => {
-      const bills = entry.bills || [];
+      const bills = legacyBills(entry);
       const customerNames = [...new Set(bills.map((b) => b.customerName))].join(', ') || '—';
       const creditTotals = entry.creditTotals || legacyCreditTotals(entry);
-      const totalDebit = entry.totalDebit ?? entry.totalSettled ?? entry.totalAmount;
+      const totalDebit = entry.totalDebit ?? entry.totalSettled ?? entry.totalAmount ?? entry.amount;
 
       const drLines = bills.length
         ? bills.map((b) => `Credit Bill — ${b.customerName} (${b.billNumber}) — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}`)
