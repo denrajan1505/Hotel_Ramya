@@ -6,7 +6,22 @@ import { logAudit } from './auditService';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-const sumBills = (bills) => round2(bills.reduce((total, b) => total + (Number(b.amount) || 0), 0));
+/**
+ * A Journal Ledger voucher is a full double-entry: Dr the bank/NEFT amount
+ * plus Dr any TDS/TCS/Commission deducted at source (they're still money the
+ * customer's account is credited for, just not cash that hit the bank), Cr
+ * each customer's account for what was actually cleared against their bill.
+ * Aggregated here from the per-bill lines so the voucher always balances
+ * (totalAmount + totalTds + totalTcs + totalCommission === totalSettled).
+ */
+function aggregateBills(bills) {
+  const totalAmount = round2(bills.reduce((t, b) => t + (Number(b.amount) || 0), 0));
+  const totalTds = round2(bills.reduce((t, b) => t + (Number(b.tds) || 0), 0));
+  const totalTcs = round2(bills.reduce((t, b) => t + (Number(b.tcs) || 0), 0));
+  const totalCommission = round2(bills.reduce((t, b) => t + (Number(b.commission) || 0), 0));
+  const totalSettled = round2(totalAmount + totalTds + totalTcs + totalCommission);
+  return { totalAmount, totalTds, totalTcs, totalCommission, totalSettled };
+}
 
 /**
  * Same UTR = same bank credit, so every bill settled against it belongs on
@@ -31,9 +46,11 @@ async function resolveJournalRef(utrNumber) {
  * of forcing the balance to zero. The UTR number is optional here since it
  * isn't always known on the day the payment is received; leaving it blank
  * still records the payment, it just skips the Journal Ledger entry until
- * updateInvoiceUtr() is called later. The Journal Ledger amount is the cash
- * portion only (`amount`), since that's what the bank statement/UTR actually
- * reconciles against — TDS/TCS/commission never hit the bank.
+ * updateInvoiceUtr() is called later. The Journal Ledger records the full
+ * double entry: `amount` is the cash/bank portion (what the UTR/bank
+ * statement actually reconciles against), while tds/tcs/commission are
+ * booked as their own Dr lines since they still reduce the customer's
+ * outstanding balance even though they never hit the bank.
  */
 export async function recordInvoicePayment({ invoice, paymentType, paymentDate, amount, tds, tcs, commission, utrNumber, user }) {
   if (!paymentType) throw new Error('Payment type is required.');
@@ -89,17 +106,21 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
         customerId: inv.customerId || null,
         customerName: inv.customerName || 'Unknown',
         amount: receivedAmount,
+        tds: tdsAmount,
+        tcs: tcsAmount,
+        commission: commissionAmount,
+        settleAmount,
       };
       if (journalSnap?.exists()) {
         const bills = [...(journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
-        tx.set(journalRef, { utrNumber: trimmedUtr, paymentType, paymentDate, bills, totalAmount: sumBills(bills), updatedAt: serverTimestamp() }, { merge: true });
+        tx.set(journalRef, { utrNumber: trimmedUtr, paymentType, paymentDate, bills, ...aggregateBills(bills), updatedAt: serverTimestamp() }, { merge: true });
       } else {
         tx.set(journalRef, {
           utrNumber: trimmedUtr,
           paymentType,
           paymentDate,
           bills: [billLine],
-          totalAmount: billLine.amount,
+          ...aggregateBills([billLine]),
           createdBy: user?.uid || null,
           createdByName: user?.displayName || user?.username || 'System',
           createdAt: serverTimestamp(),
@@ -149,7 +170,7 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
     if (detachOld && oldSnap?.exists()) {
       const remainingBills = (oldSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id);
       if (remainingBills.length) {
-        tx.set(oldJournalRef, { bills: remainingBills, totalAmount: sumBills(remainingBills), updatedAt: serverTimestamp() }, { merge: true });
+        tx.set(oldJournalRef, { bills: remainingBills, ...aggregateBills(remainingBills), updatedAt: serverTimestamp() }, { merge: true });
       } else {
         tx.delete(oldJournalRef);
       }
@@ -160,19 +181,23 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
       billNumber: inv.billNumber,
       customerId: inv.customerId || null,
       customerName: inv.customerName || 'Unknown',
-      amount: round2(inv.paymentAmount || 0),
+      amount: round2(inv.received || 0),
+      tds: round2(inv.tds || 0),
+      tcs: round2(inv.tcs || 0),
+      commission: round2(inv.commission || 0),
+      settleAmount: round2(inv.paymentAmount || 0),
     };
 
     if (newSnap.exists()) {
       const bills = [...(newSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
-      tx.set(newJournalRef, { utrNumber: trimmedUtr, paymentType: inv.paymentType, paymentDate: inv.paymentDate, bills, totalAmount: sumBills(bills), updatedAt: serverTimestamp() }, { merge: true });
+      tx.set(newJournalRef, { utrNumber: trimmedUtr, paymentType: inv.paymentType, paymentDate: inv.paymentDate, bills, ...aggregateBills(bills), updatedAt: serverTimestamp() }, { merge: true });
     } else {
       tx.set(newJournalRef, {
         utrNumber: trimmedUtr,
         paymentType: inv.paymentType,
         paymentDate: inv.paymentDate,
         bills: [billLine],
-        totalAmount: billLine.amount,
+        ...aggregateBills([billLine]),
         createdBy: user?.uid || null,
         createdByName: user?.displayName || user?.username || 'System',
         createdAt: serverTimestamp(),

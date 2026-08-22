@@ -5,27 +5,45 @@ import DataTable from '../../components/common/DataTable';
 import { listJournalLedger } from '../../services/invoicePaymentService';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 
-// One row per voucher (one per UTR) written the way a journal book reads —
-// "Bills" debited for the combined amount, "To NEFT/UTR" crediting the same
-// total — so every bill settled under the same UTR shows as one reconciled
-// entry instead of one row per bill.
+// One row per voucher (one per UTR) written as a full double entry: Dr the
+// bank/NEFT amount plus Dr any TDS/TCS/Commission deducted at source (they
+// never hit the bank, but they still cleared the customer's balance), Cr
+// each customer's account for what was actually settled against their bill.
+// Bills settled under the same UTR combine into one voucher instead of one
+// row per bill; older vouchers recorded before TDS/TCS/Commission were
+// tracked here fall back to a plain Bills-Dr / NEFT-Cr pair.
 export default function JournalLedger() {
   const { data: entries, isLoading } = useQuery({ queryKey: ['journal-ledger'], queryFn: listJournalLedger });
 
   const rows = useMemo(() => {
     return (entries || []).map((entry) => {
       const bills = entry.bills || [];
-      const billNumbers = bills.map((b) => b.billNumber).join(', ') || '—';
       const customerNames = [...new Set(bills.map((b) => b.customerName))].join(', ') || '—';
+      const totalSettled = entry.totalSettled ?? entry.totalAmount;
+
+      const drLines = [`Bank / NEFT (UTR ${entry.utrNumber}) — ${formatCurrency(entry.totalAmount)}`];
+      if (entry.totalTds) drLines.push(`TDS Receivable — ${formatCurrency(entry.totalTds)}`);
+      if (entry.totalTcs) drLines.push(`TCS Receivable — ${formatCurrency(entry.totalTcs)}`);
+      if (entry.totalCommission) drLines.push(`Commission Expense — ${formatCurrency(entry.totalCommission)}`);
+
+      const crLines = bills.length
+        ? bills.map((b) => `Customer A/c — ${b.customerName} (${b.billNumber}) — ${formatCurrency(b.settleAmount ?? b.amount)}`)
+        : [`—`];
+
+      const particulars = [
+        ...drLines.map((l) => `Dr  ${l}`),
+        ...crLines.map((l) => `      Cr  ${l}`),
+      ].join('\n');
+
       return {
         id: entry.id,
         paymentDate: entry.paymentDate,
-        particulars: `Bills — ${billNumbers}\nTo NEFT / UTR ${entry.utrNumber}`,
+        particulars,
         customerNames,
         billCount: bills.length,
         paymentType: entry.paymentType,
-        dr: entry.totalAmount,
-        cr: entry.totalAmount,
+        dr: totalSettled,
+        cr: totalSettled,
         createdByName: entry.createdByName,
       };
     });
