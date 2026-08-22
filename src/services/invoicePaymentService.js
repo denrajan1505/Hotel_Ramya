@@ -1,26 +1,60 @@
 import { doc, collection, getDocs, query, where, orderBy, runTransaction, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
+import { SETTLEMENT_ACCOUNTS } from '../constants/categories';
 import { deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const ACCOUNTS_BY_KEY = new Map(SETTLEMENT_ACCOUNTS.map((a) => [a.key, a]));
 
 /**
- * A Journal Ledger voucher is a full double-entry: Dr the bank/NEFT amount
- * plus Dr any TDS/TCS/Commission deducted at source (they're still money the
- * customer's account is credited for, just not cash that hit the bank), Cr
- * each customer's account for what was actually cleared against their bill.
- * Aggregated here from the per-bill lines so the voucher always balances
- * (totalAmount + totalTds + totalTcs + totalCommission === totalSettled).
+ * Turns the raw credit lines entered on the settlement form into a clean,
+ * balanced breakdown: each line's amount rounded and routed to its bucket
+ * (received/tds/tcs/commission — the same buckets the outstanding-balance
+ * formula in balanceCalculations.js already expects), plus a display label
+ * ('Other' lines carry their own free-text label instead of the constant's).
+ * Blank/zero lines are dropped so callers don't have to filter first.
+ */
+function sanitizeCreditLines(creditLines) {
+  const lines = [];
+  const bucketTotals = { received: 0, tds: 0, tcs: 0, commission: 0 };
+  for (const line of creditLines || []) {
+    const amount = round2(line.amount);
+    if (!(amount > 0) || !line.account) continue;
+    const meta = ACCOUNTS_BY_KEY.get(line.account);
+    const bucket = meta?.bucket || 'received';
+    const label = line.account === 'OTHER' ? String(line.label || '').trim() || 'Other' : meta?.label || line.account;
+    lines.push({ account: line.account, label, amount });
+    bucketTotals[bucket] = round2(bucketTotals[bucket] + amount);
+  }
+  const settleAmount = round2(bucketTotals.received + bucketTotals.tds + bucketTotals.tcs + bucketTotals.commission);
+  return { lines, bucketTotals, settleAmount };
+}
+
+/**
+ * A Journal Ledger voucher is a full double entry: Dr the Credit Bill(s)
+ * being cleared, Cr each settlement account (NEFT/Bank, Google Pay, Cash,
+ * Commission, TCS, TDS, or a custom "Other" account) for the portion of the
+ * bill it covered. Every bill's debitAmount equals the sum of its own
+ * creditLines, so Total Debit === Total Credit holds by construction —
+ * aggregating here just rolls per-bill lines up into voucher-wide totals
+ * per account, across however many bills share this voucher.
  */
 function aggregateBills(bills) {
-  const totalAmount = round2(bills.reduce((t, b) => t + (Number(b.amount) || 0), 0));
-  const totalTds = round2(bills.reduce((t, b) => t + (Number(b.tds) || 0), 0));
-  const totalTcs = round2(bills.reduce((t, b) => t + (Number(b.tcs) || 0), 0));
-  const totalCommission = round2(bills.reduce((t, b) => t + (Number(b.commission) || 0), 0));
-  const totalSettled = round2(totalAmount + totalTds + totalTcs + totalCommission);
-  return { totalAmount, totalTds, totalTcs, totalCommission, totalSettled };
+  const totalDebit = round2(bills.reduce((t, b) => t + (Number(b.debitAmount) || 0), 0));
+  const creditMap = new Map();
+  for (const b of bills) {
+    for (const line of b.creditLines || []) {
+      const key = line.account === 'OTHER' ? `OTHER:${line.label || ''}` : line.account;
+      const prev = creditMap.get(key) || { account: line.account, label: line.label || null, amount: 0 };
+      prev.amount = round2(prev.amount + (Number(line.amount) || 0));
+      creditMap.set(key, prev);
+    }
+  }
+  const creditTotals = [...creditMap.values()];
+  const totalCredit = round2(creditTotals.reduce((t, c) => t + c.amount, 0));
+  return { totalDebit, creditTotals, totalCredit };
 }
 
 /**
@@ -36,60 +70,70 @@ async function resolveJournalRef(utrNumber) {
 }
 
 /**
- * Settles a bill directly on the invoice itself — no separate Receipt or
- * Bill Matching step. `amount` is the actual cash/bank credit; tds/tcs/
- * commission are the deducted-at-source portions (commission mainly applies
- * to Portal bills) that also count against the outstanding balance per the
- * spec formula in balanceCalculations.js. Together they default to covering
- * the full outstanding balance, but any total up to it is accepted, so a
- * partial payment leaves the remainder outstanding ("Partially Paid") instead
- * of forcing the balance to zero. The UTR number is optional here since it
- * isn't always known on the day the payment is received; leaving it blank
- * still records the payment, it just skips the Journal Ledger entry until
- * updateInvoiceUtr() is called later. The Journal Ledger records the full
- * double entry: `amount` is the cash/bank portion (what the UTR/bank
- * statement actually reconciles against), while tds/tcs/commission are
- * booked as their own Dr lines since they still reduce the customer's
- * outstanding balance even though they never hit the bank.
+ * Derives the invoice's "Payment Type" summary from this settlement's lines —
+ * the cash/bank accounts used (e.g. "Google Pay + Cash"), or if the bill was
+ * cleared entirely by deductions (TDS/TCS/Commission, no cash line), all the
+ * line labels instead.
  */
-export async function recordInvoicePayment({ invoice, paymentType, paymentDate, amount, tds, tcs, commission, utrNumber, user }) {
-  if (!paymentType) throw new Error('Payment type is required.');
+function derivePaymentType(lines) {
+  const cash = lines.filter((l) => (ACCOUNTS_BY_KEY.get(l.account)?.bucket || 'received') === 'received');
+  const source = cash.length ? cash : lines;
+  return [...new Set(source.map((l) => l.label))].join(' + ');
+}
+
+/**
+ * Settles a bill directly on the invoice itself — no separate Receipt or
+ * Bill Matching step. `creditLines` is the free-form list of settlement
+ * accounts (NEFT/Bank, Google Pay, Cash, Commission, TCS, TDS, Other) the
+ * user split this settlement across; together they default to covering the
+ * full outstanding balance, but any total up to it is accepted, so a partial
+ * payment leaves the remainder outstanding ("Partially Paid") instead of
+ * forcing the balance to zero. The UTR number is optional since it isn't
+ * always known on the day the payment is received — every settlement still
+ * creates its own Journal Ledger voucher immediately (Dr the bill, Cr each
+ * account), and later adding a UTR via updateInvoiceUtr() merges it into the
+ * shared voucher for that UTR instead of leaving it standalone.
+ */
+export async function recordInvoicePayment({ invoice, paymentDate, creditLines, utrNumber, user }) {
   if (!paymentDate) throw new Error('Payment date is required.');
 
   const invoiceRef = doc(db, COLLECTIONS.INVOICES, invoice.id);
   const trimmedUtr = String(utrNumber || '').trim();
-  const journalRef = trimmedUtr ? await resolveJournalRef(trimmedUtr) : null;
+  // A shared UTR dedupes onto the same voucher; with no UTR there's no key
+  // to merge on, so each settlement gets its own fresh voucher rather than
+  // risking an accidental merge of unrelated cash/GPay settlements.
+  const journalRef = trimmedUtr ? await resolveJournalRef(trimmedUtr) : doc(collection(db, COLLECTIONS.JOURNAL_LEDGER));
+
+  const { lines, bucketTotals, settleAmount } = sanitizeCreditLines(creditLines);
+  if (!lines.length) throw new Error('Add at least one credit line.');
 
   const result = await runTransaction(db, async (tx) => {
     const snap = await tx.get(invoiceRef);
     if (!snap.exists()) throw new Error('Invoice not found.');
-    const journalSnap = journalRef ? await tx.get(journalRef) : null;
+    const journalSnap = await tx.get(journalRef);
     const inv = snap.data();
     const outstanding = round2(inv.outstanding);
     if (outstanding <= 0) throw new Error('This bill has no outstanding balance to settle.');
 
-    const receivedAmount = round2(amount);
-    const tdsAmount = round2(tds);
-    const tcsAmount = round2(tcs);
-    const commissionAmount = round2(commission);
-    const settleAmount = round2(receivedAmount + tdsAmount + tcsAmount + commissionAmount);
     if (!(settleAmount > 0)) throw new Error('Enter an amount greater than zero.');
-    if (settleAmount > outstanding + 0.01) throw new Error(`Amount, TDS, TCS and Commission together can't exceed the outstanding balance of ${outstanding}.`);
+    if (settleAmount > outstanding + 0.01) throw new Error(`Credit lines together (${settleAmount}) can't exceed the outstanding balance of ${outstanding}.`);
     const newOutstanding = round2(outstanding - settleAmount);
     const status = deriveInvoiceStatus(newOutstanding, inv.billAmount, inv.dueDate);
+    const paymentType = derivePaymentType(lines);
 
     tx.update(invoiceRef, {
-      received: round2((inv.received || 0) + receivedAmount),
-      tds: round2((inv.tds || 0) + tdsAmount),
-      tcs: round2((inv.tcs || 0) + tcsAmount),
-      commission: round2((inv.commission || 0) + commissionAmount),
+      received: round2((inv.received || 0) + bucketTotals.received),
+      tds: round2((inv.tds || 0) + bucketTotals.tds),
+      tcs: round2((inv.tcs || 0) + bucketTotals.tcs),
+      commission: round2((inv.commission || 0) + bucketTotals.commission),
       outstanding: newOutstanding,
       status,
       paymentType,
+      creditLines: lines,
       paymentDate,
       paymentAmount: settleAmount,
       utrNumber: trimmedUtr,
-      journalEntryId: journalRef?.id || null,
+      journalEntryId: journalRef.id,
       paidAt: serverTimestamp(),
       paidBy: user?.uid || null,
       paidByName: user?.displayName || user?.username || 'System',
@@ -99,36 +143,31 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
       tx.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, inv.customerId), { currentOutstanding: increment(-settleAmount) }, { merge: true });
     }
 
-    if (journalRef) {
-      const billLine = {
-        invoiceId: invoice.id,
-        billNumber: inv.billNumber,
-        customerId: inv.customerId || null,
-        customerName: inv.customerName || 'Unknown',
-        amount: receivedAmount,
-        tds: tdsAmount,
-        tcs: tcsAmount,
-        commission: commissionAmount,
-        settleAmount,
-      };
-      if (journalSnap?.exists()) {
-        const bills = [...(journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
-        tx.set(journalRef, { utrNumber: trimmedUtr, paymentType, paymentDate, bills, ...aggregateBills(bills), updatedAt: serverTimestamp() }, { merge: true });
-      } else {
-        tx.set(journalRef, {
-          utrNumber: trimmedUtr,
-          paymentType,
-          paymentDate,
-          bills: [billLine],
-          ...aggregateBills([billLine]),
-          createdBy: user?.uid || null,
-          createdByName: user?.displayName || user?.username || 'System',
-          createdAt: serverTimestamp(),
-        });
-      }
+    const billLine = {
+      invoiceId: invoice.id,
+      billNumber: inv.billNumber,
+      customerId: inv.customerId || null,
+      customerName: inv.customerName || 'Unknown',
+      debitAmount: settleAmount,
+      creditLines: lines,
+    };
+    if (journalSnap.exists()) {
+      const bills = [...(journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
+      tx.set(journalRef, { utrNumber: trimmedUtr, paymentType, paymentDate, bills, ...aggregateBills(bills), updatedAt: serverTimestamp() }, { merge: true });
+    } else {
+      tx.set(journalRef, {
+        utrNumber: trimmedUtr,
+        paymentType,
+        paymentDate,
+        bills: [billLine],
+        ...aggregateBills([billLine]),
+        createdBy: user?.uid || null,
+        createdByName: user?.displayName || user?.username || 'System',
+        createdAt: serverTimestamp(),
+      });
     }
 
-    return { settleAmount, receivedAmount, tdsAmount, tcsAmount, commissionAmount };
+    return { settleAmount, ...bucketTotals };
   });
 
   await logAudit({
@@ -137,15 +176,17 @@ export async function recordInvoicePayment({ invoice, paymentType, paymentDate, 
     module: 'Invoices',
     invoiceNumber: invoice.billNumber,
     utrNumber: trimmedUtr || null,
-    newValue: { ...result, paymentType, paymentDate, utrNumber: trimmedUtr },
+    newValue: { ...result, paymentDate, utrNumber: trimmedUtr, creditLines: lines },
   });
 }
 
 /**
  * Adds or corrects the UTR number on a bill that's already been settled —
- * the manual bank-statement-reconciliation step. Creates the Journal Ledger
- * entry for that UTR the first time, and updates the same entry in place on
- * later edits instead of piling up duplicates.
+ * the manual bank-statement-reconciliation step. Every settlement already
+ * has its own voucher (standalone if it had no UTR at the time), so this
+ * detaches the bill from that standalone voucher and merges it into the
+ * shared voucher for the new UTR (creating it the first time), deleting the
+ * old standalone voucher once it's left empty.
  */
 export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
   const trimmedUtr = String(utrNumber || '').trim();
@@ -154,7 +195,7 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
 
   const invoiceRef = doc(db, COLLECTIONS.INVOICES, invoice.id);
   const oldJournalRef = invoice.journalEntryId ? doc(db, COLLECTIONS.JOURNAL_LEDGER, invoice.journalEntryId) : null;
-  const utrChanged = Boolean(invoice.utrNumber) && invoice.utrNumber !== trimmedUtr;
+  const utrChanged = invoice.utrNumber !== trimmedUtr;
   // Reuse the same voucher on a no-op re-save; otherwise find (or create) the
   // voucher for the new UTR so bills sharing it land on one entry.
   const newJournalRef = !utrChanged && oldJournalRef ? oldJournalRef : await resolveJournalRef(trimmedUtr);
@@ -181,11 +222,8 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
       billNumber: inv.billNumber,
       customerId: inv.customerId || null,
       customerName: inv.customerName || 'Unknown',
-      amount: round2(inv.received || 0),
-      tds: round2(inv.tds || 0),
-      tcs: round2(inv.tcs || 0),
-      commission: round2(inv.commission || 0),
-      settleAmount: round2(inv.paymentAmount || 0),
+      debitAmount: round2(inv.paymentAmount || 0),
+      creditLines: inv.creditLines || [],
     };
 
     if (newSnap.exists()) {

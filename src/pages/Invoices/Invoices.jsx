@@ -9,7 +9,7 @@ import Modal from '../../components/common/Modal';
 import { listInvoices, setInvoiceCategory } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
-import { CATEGORIES, CATEGORY_TABS, PAYMENT_TYPES } from '../../constants/categories';
+import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
@@ -110,48 +110,25 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
     onError: (err) => toast.error(err.message),
   });
 
-  const [paymentType, setPaymentType] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [paymentAmount, setPaymentAmount] = useState(() => (invoice?.outstanding ?? 0).toFixed(2));
-  const [amountTouched, setAmountTouched] = useState(false);
-  const [tdsInput, setTdsInput] = useState('0');
-  const [tcsInput, setTcsInput] = useState('0');
-  const [commissionInput, setCommissionInput] = useState('0');
+  const [lines, setLines] = useState(() => [{ account: 'NEFT', label: '', amount: (invoice?.outstanding ?? 0).toFixed(2) }]);
   const [utrInput, setUtrInput] = useState('');
   const [utrEdit, setUtrEdit] = useState(invoice?.utrNumber || '');
 
-  // Amount auto-fills with "outstanding minus deductions" so entering TDS/TCS/
-  // Commission (deducted at source, never hits the bank) narrows down to the
-  // actual cash received — until the admin edits Amount directly themselves.
-  const applyDeduction = (setter) => (e) => {
-    const value = e.target.value;
-    setter(value);
-    if (!amountTouched) {
-      const outstanding = invoice?.outstanding ?? 0;
-      const tds = setter === setTdsInput ? Number(value) : Number(tdsInput);
-      const tcs = setter === setTcsInput ? Number(value) : Number(tcsInput);
-      const commission = setter === setCommissionInput ? Number(value) : Number(commissionInput);
-      setPaymentAmount(round2(Math.max(0, outstanding - tds - tcs - commission)).toFixed(2));
-    }
-  };
+  const updateLine = (index, patch) => setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((prev) => [...prev, { account: '', label: '', amount: '' }]);
+  const removeLine = (index) => setLines((prev) => prev.filter((_, i) => i !== index));
 
-  const amountValue = Number(paymentAmount);
-  const tdsValue = Number(tdsInput) || 0;
-  const tcsValue = Number(tcsInput) || 0;
-  const commissionValue = Number(commissionInput) || 0;
-  const totalSettle = round2(amountValue + tdsValue + tcsValue + commissionValue);
-  const amountValid = totalSettle > 0 && totalSettle <= (invoice?.outstanding ?? 0) + 0.01;
+  const completeLines = lines.filter((l) => l.account && (l.account !== 'OTHER' || l.label.trim()) && Number(l.amount) > 0);
+  const totalSettle = round2(completeLines.reduce((t, l) => t + (Number(l.amount) || 0), 0));
+  const amountValid = completeLines.length > 0 && totalSettle > 0 && totalSettle <= (invoice?.outstanding ?? 0) + 0.01;
 
   const settleMutation = useMutation({
     mutationFn: () =>
       recordInvoicePayment({
         invoice,
-        paymentType,
         paymentDate: new Date(paymentDate),
-        amount: amountValue,
-        tds: tdsValue,
-        tcs: tcsValue,
-        commission: commissionValue,
+        creditLines: completeLines.map((l) => ({ account: l.account, label: l.label, amount: Number(l.amount) })),
         utrNumber: utrInput,
         user,
       }),
@@ -233,51 +210,53 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
       {invoice.outstanding > 0 ? (
         canRecordPayment ? (
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-              <div>
-                <label className="label">Amount Received</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="input"
-                  value={paymentAmount}
-                  onChange={(e) => {
-                    setAmountTouched(true);
-                    setPaymentAmount(e.target.value);
-                  }}
-                />
-              </div>
-              <div>
-                <label className="label">TDS</label>
-                <input type="number" step="0.01" min="0" className="input" value={tdsInput} onChange={applyDeduction(setTdsInput)} />
-              </div>
-              <div>
-                <label className="label">TCS</label>
-                <input type="number" step="0.01" min="0" className="input" value={tcsInput} onChange={applyDeduction(setTcsInput)} />
-              </div>
-              <div>
-                <label className="label">Commission</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="input"
-                  value={commissionInput}
-                  onChange={applyDeduction(setCommissionInput)}
-                />
-              </div>
-              <div>
-                <label className="label">Payment Type</label>
-                <select className="input" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
-                  <option value="">Select…</option>
-                  {PAYMENT_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <label className="label">Credit Lines</label>
+            <div className="space-y-2">
+              {lines.map((line, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="input !w-auto min-w-[9rem]"
+                    value={line.account}
+                    onChange={(e) => updateLine(i, { account: e.target.value })}
+                  >
+                    <option value="">Select account…</option>
+                    {SETTLEMENT_ACCOUNTS.map((a) => (
+                      <option key={a.key} value={a.key}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                  {line.account === 'OTHER' && (
+                    <input
+                      type="text"
+                      className="input !w-auto min-w-[8rem]"
+                      placeholder="Account name"
+                      value={line.label}
+                      onChange={(e) => updateLine(i, { label: e.target.value })}
+                    />
+                  )}
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input !w-32"
+                    placeholder="Amount"
+                    value={line.amount}
+                    onChange={(e) => updateLine(i, { amount: e.target.value })}
+                  />
+                  {lines.length > 1 && (
+                    <button type="button" className="btn-outline !px-2 !py-1 text-xs" onClick={() => removeLine(i)}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="btn-outline mt-2 !px-3 !py-1.5 text-xs" onClick={addLine}>
+              + Add Line
+            </button>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Payment Date</label>
                 <input type="date" className="input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
@@ -295,8 +274,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
             </div>
             {!amountValid && (
               <p className="mt-2 text-xs text-danger-600">
-                Amount + TDS + TCS + Commission must total between ₹0.01 and the outstanding balance of{' '}
-                {formatCurrency(invoice.outstanding)}.
+                Credit lines together must total between ₹0.01 and the outstanding balance of {formatCurrency(invoice.outstanding)}.
               </p>
             )}
             {amountValid && totalSettle < invoice.outstanding && (
@@ -306,7 +284,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
             )}
             <button
               className="btn-primary mt-3"
-              disabled={!paymentType || !paymentDate || !amountValid || settleMutation.isPending}
+              disabled={!paymentDate || !amountValid || settleMutation.isPending}
               onClick={() => settleMutation.mutate()}
             >
               Record Payment — {formatCurrency(totalSettle || 0)}
@@ -322,6 +300,13 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
             <Field label="Payment Date" value={formatDate(invoice.paymentDate)} />
             <Field label="Amount Settled" value={formatCurrency(invoice.paymentAmount)} />
           </div>
+          {invoice.creditLines?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-4">
+              {invoice.creditLines.map((l, i) => (
+                <Field key={i} label={l.label} value={formatCurrency(l.amount)} />
+              ))}
+            </div>
+          )}
           <div className="mt-3">
             <label className="label">UTR Number</label>
             <div className="flex flex-wrap items-center gap-2">
@@ -342,7 +327,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
                 </button>
               )}
             </div>
-            <p className="mt-1 text-xs text-slate-400">Saving a UTR number creates its entry in the Journal Ledger.</p>
+            <p className="mt-1 text-xs text-slate-400">Saving a UTR number merges this bill into the shared Journal Ledger voucher for that UTR.</p>
           </div>
         </div>
       ) : (allocations || []).length > 0 ? (

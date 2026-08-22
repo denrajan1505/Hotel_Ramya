@@ -58,5 +58,19 @@ export const INVOICE_STATUS = {
 
 export const PAYMENT_MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Card', 'Credit Card', 'Razorpay', 'Cheque', 'Cash', 'Cash Deposit', 'Other'];
 
-// Payment types offered when settling a bill directly on the Invoices page.
-export const PAYMENT_TYPES = ['NEFT', 'Cash', 'UPI', 'Google Pay', 'Card'];
+// Settlement accounts selectable as a Journal Ledger credit line when
+// clearing a credit bill. `bucket` says which cumulative invoice field the
+// line's amount feeds into for the outstanding-balance formula — TDS/TCS/
+// Commission are the spec's special deductions, everything else counts as
+// cash/bank "received". 'OTHER' takes a free-text label from the user.
+export const SETTLEMENT_ACCOUNTS = [
+  { key: 'NEFT', label: 'NEFT / Bank', bucket: 'received' },
+  { key: 'GPAY', label: 'Google Pay', bucket: 'received' },
+  { key: 'CASH', label: 'Cash', bucket: 'received' },
+  { key: 'UPI', label: 'UPI', bucket: 'received' },
+  { key: 'CARD', label: 'Card', bucket: 'received' },
+  { key: 'COMMISSION', label: 'Commission', bucket: 'commission' },
+  { key: 'TCS', label: 'TCS', bucket: 'tcs' },
+  { key: 'TDS', label: 'TDS', bucket: 'tds' },
+  { key: 'OTHER', label: 'Other', bucket: 'received' },
+];

@@ -5,13 +5,25 @@ import DataTable from '../../components/common/DataTable';
 import { listJournalLedger } from '../../services/invoicePaymentService';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 
-// One row per voucher (one per UTR) written as a full double entry: Dr the
-// bank/NEFT amount plus Dr any TDS/TCS/Commission deducted at source (they
-// never hit the bank, but they still cleared the customer's balance), Cr
-// each customer's account for what was actually settled against their bill.
+// Vouchers written before credit lines were introduced only carried fixed
+// totalAmount/totalTds/totalTcs/totalCommission fields (all Cr Bank/NEFT and
+// deductions). Rebuilt here into the same {label, amount} shape as
+// entry.creditTotals so older entries still render correctly.
+function legacyCreditTotals(entry) {
+  const out = [];
+  if (entry.totalAmount) out.push({ label: entry.paymentType || 'Bank/Cash', amount: entry.totalAmount });
+  if (entry.totalTds) out.push({ label: 'TDS', amount: entry.totalTds });
+  if (entry.totalTcs) out.push({ label: 'TCS', amount: entry.totalTcs });
+  if (entry.totalCommission) out.push({ label: 'Commission', amount: entry.totalCommission });
+  return out;
+}
+
+// One row per voucher (one per UTR, or standalone for cash/GPay settlements
+// with no UTR): a full double entry, Dr each Credit Bill being cleared, Cr
+// each settlement account (NEFT/Bank, Google Pay, Cash, Commission, TCS,
+// TDS, or a custom "Other" account) for the portion of the bill it covered.
 // Bills settled under the same UTR combine into one voucher instead of one
-// row per bill; older vouchers recorded before TDS/TCS/Commission were
-// tracked here fall back to a plain Bills-Dr / NEFT-Cr pair.
+// row per bill.
 export default function JournalLedger() {
   const { data: entries, isLoading } = useQuery({ queryKey: ['journal-ledger'], queryFn: listJournalLedger });
 
@@ -19,15 +31,14 @@ export default function JournalLedger() {
     return (entries || []).map((entry) => {
       const bills = entry.bills || [];
       const customerNames = [...new Set(bills.map((b) => b.customerName))].join(', ') || '—';
-      const totalSettled = entry.totalSettled ?? entry.totalAmount;
+      const creditTotals = entry.creditTotals || legacyCreditTotals(entry);
+      const totalDebit = entry.totalDebit ?? entry.totalSettled ?? entry.totalAmount;
 
-      const drLines = [`Bank / NEFT (UTR ${entry.utrNumber}) — ${formatCurrency(entry.totalAmount)}`];
-      if (entry.totalTds) drLines.push(`TDS Receivable — ${formatCurrency(entry.totalTds)}`);
-      if (entry.totalTcs) drLines.push(`TCS Receivable — ${formatCurrency(entry.totalTcs)}`);
-      if (entry.totalCommission) drLines.push(`Commission Expense — ${formatCurrency(entry.totalCommission)}`);
-
-      const crLines = bills.length
-        ? bills.map((b) => `Customer A/c — ${b.customerName} (${b.billNumber}) — ${formatCurrency(b.settleAmount ?? b.amount)}`)
+      const drLines = bills.length
+        ? bills.map((b) => `Credit Bill — ${b.customerName} (${b.billNumber}) — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}`)
+        : [`—`];
+      const crLines = creditTotals.length
+        ? creditTotals.map((c) => `${c.label || c.account} — ${formatCurrency(c.amount)}`)
         : [`—`];
 
       const particulars = [
@@ -42,8 +53,8 @@ export default function JournalLedger() {
         customerNames,
         billCount: bills.length,
         paymentType: entry.paymentType,
-        dr: totalSettled,
-        cr: totalSettled,
+        dr: totalDebit,
+        cr: totalDebit,
         createdByName: entry.createdByName,
       };
     });
@@ -53,13 +64,13 @@ export default function JournalLedger() {
     <div>
       <PageHeader
         title="Journal Ledger"
-        subtitle="Bank UTRs reconciled against bills — bills settled under the same UTR combine into one entry"
+        subtitle="Settlement vouchers for cleared bills — bills settled under the same UTR combine into one entry"
       />
 
       <DataTable
         loading={isLoading}
         rows={rows}
-        emptyLabel="No journal entries yet — these are created automatically once a UTR number is added to a settled bill."
+        emptyLabel="No journal entries yet — these are created automatically whenever a bill is settled."
         exportFilename="journal-ledger"
         columns={[
           { key: 'paymentDate', header: 'Date', render: (r) => formatDate(r.paymentDate) },
