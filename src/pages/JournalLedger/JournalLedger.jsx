@@ -56,7 +56,7 @@ export default function JournalLedger() {
       const totalDebit = entry.totalDebit ?? entry.totalSettled ?? entry.totalAmount ?? entry.amount;
 
       const drLines = bills.length
-        ? bills.map((b) => `Credit Bill — ${b.customerName} (${b.billNumber}) — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}`)
+        ? bills.map((b) => `Credit Bill — ${b.billNumber}${b.isPartial ? ' (part payment)' : ''} — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}`)
         : [`—`];
       const crLines = creditTotals.length
         ? creditTotals.map((c) => `${c.label || c.account} — ${formatCurrency(c.amount)}`)

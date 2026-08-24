@@ -150,6 +150,7 @@ export async function recordInvoicePayment({ invoice, paymentDate, creditLines, 
       customerName: inv.customerName || 'Unknown',
       debitAmount: settleAmount,
       creditLines: lines,
+      isPartial: newOutstanding > 0.01,
     };
     if (journalSnap.exists()) {
       const bills = [...(journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id), billLine];
@@ -224,6 +225,7 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
       customerName: inv.customerName || 'Unknown',
       debitAmount: round2(inv.paymentAmount || 0),
       creditLines: inv.creditLines || [],
+      isPartial: round2(inv.outstanding || 0) > 0.01,
     };
 
     if (newSnap.exists()) {
