@@ -51,7 +51,15 @@ export default function JournalLedger() {
   const rows = useMemo(() => {
     return (entries || []).map((entry) => {
       const bills = legacyBills(entry);
-      const customerNames = [...new Set(bills.map((b) => b.customerName))].join(', ') || '—';
+      // Bills settled under the same UTR are usually all the same customer's,
+      // so this collapses to that one name. A voucher spanning several
+      // customers (e.g. a batch transfer settling multiple accounts at once)
+      // would otherwise print every name comma-separated — crowded and hard
+      // to read in the table or the PDF — so it's consolidated down to the
+      // first name plus a count of the rest instead.
+      const distinctNames = [...new Set(bills.map((b) => b.customerName))];
+      const customerNames =
+        distinctNames.length <= 1 ? distinctNames[0] || '—' : `${distinctNames[0]} & ${distinctNames.length - 1} other${distinctNames.length > 2 ? 's' : ''}`;
       const creditTotals = entry.creditTotals || legacyCreditTotals(entry);
       const totalDebit = entry.totalDebit ?? entry.totalSettled ?? entry.totalAmount ?? entry.amount;
 

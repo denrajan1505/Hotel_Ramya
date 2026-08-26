@@ -6,15 +6,29 @@ import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
-import { listInvoices, setInvoiceCategory } from '../../services/invoiceService';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
+import { Trash2 } from 'lucide-react';
+import { listInvoices, setInvoiceCategory, deleteInvoicesBulk } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
 import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, toDate } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Local calendar-day key (not toISOString, which shifts the day backward in
+// any timezone ahead of UTC) so a <input type="date"> value can be matched
+// against businessDate reliably.
+function localDateKey(value) {
+  const date = toDate(value);
+  if (!date) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export default function Invoices() {
   const { user, can } = useAuth();
@@ -22,6 +36,9 @@ export default function Invoices() {
   const { data: invoices, isLoading } = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });
   const [activeTab, setActiveTab] = useState('ALL');
   const [selected, setSelected] = useState(null);
+  const canDelete = can('DELETE_FINANCIAL_RECORDS');
+  const [deleteDate, setDeleteDate] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const filtered = useMemo(() => {
     // "All Bills" is the uncategorised inbox, not everything — any bill with
@@ -34,24 +51,84 @@ export default function Invoices() {
     return (invoices || []).filter((inv) => inv.category === tab.value);
   }, [invoices, activeTab]);
 
+  // Matches every bill on the chosen date regardless of category/tab, since
+  // a bad import needs to be fully removed, not just the unclassified slice.
+  const deleteCandidates = useMemo(() => {
+    if (!deleteDate) return [];
+    return (invoices || []).filter((inv) => localDateKey(inv.businessDate) === deleteDate);
+  }, [invoices, deleteDate]);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteInvoicesBulk(deleteCandidates, user),
+    onSuccess: ({ deletedCount }) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      invalidateDashboard(queryClient);
+      toast.success(`Deleted ${deletedCount} bill(s) for ${deleteDate}.`);
+      setConfirmDelete(false);
+      setDeleteDate('');
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   return (
     <div>
       <PageHeader title="Invoices" subtitle="All credit invoices imported or created in the system" />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {CATEGORY_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={clsx(
-              'rounded-xl px-4 py-2 text-sm font-medium transition-colors',
-              activeTab === tab.key ? 'bg-primary-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-primary-900/60 dark:text-slate-300 dark:hover:bg-white/10',
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {CATEGORY_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={clsx(
+                'rounded-xl px-4 py-2 text-sm font-medium transition-colors',
+                activeTab === tab.key ? 'bg-primary-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-primary-900/60 dark:text-slate-300 dark:hover:bg-white/10',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {canDelete && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              className="input !w-auto"
+              value={deleteDate}
+              onChange={(e) => setDeleteDate(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn-danger !px-3 !py-1.5 text-xs"
+              disabled={!deleteDate || deleteCandidates.length === 0}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 size={14} /> Delete Bills for Date
+            </button>
+            {deleteDate && (
+              <span className="text-xs text-slate-400">
+                {deleteCandidates.length} bill(s) match {deleteDate}
+              </span>
             )}
-          >
-            {tab.label}
-          </button>
-        ))}
+          </div>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        title="Delete Bills"
+        danger
+        confirmLabel="Delete Permanently"
+        loading={deleteMutation.isPending}
+        message={`This will permanently delete ${deleteCandidates.length} bill(s) dated ${deleteDate} and adjust any affected customers' outstanding balances. This cannot be undone.${
+          deleteCandidates.some((inv) => inv.paymentType)
+            ? ` Note: ${deleteCandidates.filter((inv) => inv.paymentType).length} of these already have a recorded payment — deleting them will not remove their Journal Ledger voucher entry.`
+            : ''
+        }`}
+      />
 
       <DataTable
         loading={isLoading}

@@ -140,4 +140,54 @@ export async function deleteInvoice(id, user) {
   });
 }
 
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Bulk-deletes a set of already-loaded invoices (e.g. every bill on a given
+ * business date) and nets the removal out of each affected customer's
+ * creditAccounts balance — the same balance-sync commitFoCashierImport()
+ * does for a replace-import, exposed here as a standalone admin action for
+ * correcting bad imports without needing replacement data to re-import.
+ */
+export async function deleteInvoicesBulk(invoiceList, user) {
+  if (!invoiceList.length) return { deletedCount: 0 };
+
+  const creditAccountDelta = new Map();
+  invoiceList.forEach((inv) => {
+    if (inv.customerId) {
+      const removed = Number(inv.outstanding) || 0;
+      creditAccountDelta.set(inv.customerId, (creditAccountDelta.get(inv.customerId) || 0) - removed);
+    }
+  });
+
+  for (const chunk of chunkArray(invoiceList, 450)) {
+    const batch = writeBatch(db);
+    chunk.forEach((inv) => batch.delete(doc(db, COLLECTIONS.INVOICES, inv.id)));
+    await batch.commit();
+  }
+
+  const customerIds = [...creditAccountDelta.keys()];
+  for (const idsChunk of chunkArray(customerIds, 450)) {
+    const batch = writeBatch(db);
+    idsChunk.forEach((customerId) => {
+      const delta = Math.round((creditAccountDelta.get(customerId) || 0) * 100) / 100;
+      if (delta !== 0) batch.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, customerId), { currentOutstanding: increment(delta) }, { merge: true });
+    });
+    await batch.commit();
+  }
+
+  await logAudit({
+    user,
+    action: 'Bills Deleted',
+    module: 'Invoices',
+    newValue: { deletedCount: invoiceList.length, billNumbers: invoiceList.map((i) => i.billNumber) },
+  });
+
+  return { deletedCount: invoiceList.length };
+}
+
 export { invoices as invoicesCrud };
