@@ -130,7 +130,13 @@ export async function setInvoiceCategory(id, category, user) {
 
 export async function deleteInvoice(id, user) {
   const before = await invoices.get(id);
-  await invoices.remove(id);
+  const batch = writeBatch(db);
+  batch.delete(doc(db, COLLECTIONS.INVOICES, id));
+  const removed = Number(before?.outstanding) || 0;
+  if (before?.customerId && removed !== 0) {
+    batch.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, before.customerId), { currentOutstanding: increment(-removed) }, { merge: true });
+  }
+  await batch.commit();
   await logAudit({
     user,
     action: 'Invoice Deleted',

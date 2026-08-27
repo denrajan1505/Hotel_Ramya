@@ -43,6 +43,18 @@ export function toDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+// Local calendar-day key (not toISOString, which shifts the day backward in
+// any timezone ahead of UTC) so a <input type="date"> value can be matched
+// against a stored date reliably.
+export function localDateKey(value) {
+  const date = toDate(value);
+  if (!date) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function daysBetween(from, to = new Date()) {
   const a = toDate(from);
   const b = toDate(to);

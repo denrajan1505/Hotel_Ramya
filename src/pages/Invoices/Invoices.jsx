@@ -8,27 +8,23 @@ import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { Trash2 } from 'lucide-react';
-import { listInvoices, setInvoiceCategory, deleteInvoicesBulk } from '../../services/invoiceService';
+import { listInvoices, setInvoiceCategory, deleteInvoicesBulk, deleteInvoice } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
-import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS } from '../../constants/categories';
+import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS, INVOICE_STATUS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
-import { formatCurrency, formatDate, toDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, localDateKey } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Local calendar-day key (not toISOString, which shifts the day backward in
-// any timezone ahead of UTC) so a <input type="date"> value can be matched
-// against businessDate reliably.
-function localDateKey(value) {
-  const date = toDate(value);
-  if (!date) return null;
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
+// A bill is "Paid" once its status has settled to Paid (outstanding <= 0).
+// Paid bills are shown only under the dedicated Paid tab so the working tabs
+// (All Bills/Company/Individual/...) stay focused on bills still needing
+// attention.
+const isPaidInvoice = (inv) => inv.status === INVOICE_STATUS.PAID;
+
+const TABS = [...CATEGORY_TABS, { key: 'PAID', label: 'Paid', value: null }];
 
 export default function Invoices() {
   const { user, can } = useAuth();
@@ -39,16 +35,22 @@ export default function Invoices() {
   const canDelete = can('DELETE_FINANCIAL_RECORDS');
   const [deleteDate, setDeleteDate] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState(null);
 
   const filtered = useMemo(() => {
-    // "All Bills" is the uncategorised inbox, not everything — any bill with
-    // a real category (assigned at import or otherwise) belongs only in its
-    // own tab, not here too.
-    if (activeTab === 'ALL') {
-      return (invoices || []).filter((inv) => !inv.category || inv.category === CATEGORIES.UNCLASSIFIED);
+    let list;
+    if (activeTab === 'PAID') {
+      list = (invoices || []).filter(isPaidInvoice);
+    } else if (activeTab === 'ALL') {
+      // "All Bills" is the uncategorised inbox, not everything — any bill with
+      // a real category (assigned at import or otherwise) belongs only in its
+      // own tab, not here too. Paid bills of any category move to the Paid tab.
+      list = (invoices || []).filter((inv) => !isPaidInvoice(inv) && (!inv.category || inv.category === CATEGORIES.UNCLASSIFIED));
+    } else {
+      const tab = CATEGORY_TABS.find((t) => t.key === activeTab);
+      list = (invoices || []).filter((inv) => !isPaidInvoice(inv) && inv.category === tab.value);
     }
-    const tab = CATEGORY_TABS.find((t) => t.key === activeTab);
-    return (invoices || []).filter((inv) => inv.category === tab.value);
+    return list.map((inv) => ({ ...inv, paid: isPaidInvoice(inv) ? 'Yes' : 'No' }));
   }, [invoices, activeTab]);
 
   // Matches every bill on the chosen date regardless of category/tab, since
@@ -70,13 +72,24 @@ export default function Invoices() {
     onError: (err) => toast.error(err.message),
   });
 
+  const rowDeleteMutation = useMutation({
+    mutationFn: () => deleteInvoice(rowToDelete.id, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      invalidateDashboard(queryClient);
+      toast.success(`Bill ${rowToDelete.billNumber} deleted.`);
+      setRowToDelete(null);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   return (
     <div>
       <PageHeader title="Invoices" subtitle="All credit invoices imported or created in the system" />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {CATEGORY_TABS.map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -130,6 +143,19 @@ export default function Invoices() {
         }`}
       />
 
+      <ConfirmDialog
+        open={Boolean(rowToDelete)}
+        onClose={() => setRowToDelete(null)}
+        onConfirm={() => rowDeleteMutation.mutate()}
+        title="Delete Bill"
+        danger
+        confirmLabel="Delete Permanently"
+        loading={rowDeleteMutation.isPending}
+        message={`This will permanently delete bill ${rowToDelete?.billNumber} and adjust the customer's outstanding balance. This cannot be undone.${
+          rowToDelete?.paymentType ? ' Note: this bill already has a recorded payment — deleting it will not remove its Journal Ledger voucher entry.' : ''
+        }`}
+      />
+
       <DataTable
         loading={isLoading}
         rows={filtered}
@@ -152,6 +178,38 @@ export default function Invoices() {
           { key: 'paymentDate', header: 'Payment Date', render: (r) => (r.paymentDate ? formatDate(r.paymentDate) : '—') },
           { key: 'utrNumber', header: 'UTR Number', render: (r) => r.utrNumber || '—' },
           { key: 'status', header: 'Status', render: (r) => <StatusBadge value={r.status} /> },
+          {
+            key: 'paid',
+            header: 'Paid',
+            render: (r) =>
+              r.paid === 'Yes' ? (
+                <span className="badge bg-success-50 text-success-600 dark:bg-success-500/10">Yes</span>
+              ) : (
+                <span className="text-slate-400">No</span>
+              ),
+          },
+          ...(canDelete
+            ? [
+                {
+                  key: 'rowDelete',
+                  header: '',
+                  sortable: false,
+                  render: (r) => (
+                    <button
+                      type="button"
+                      title="Delete this bill"
+                      className="rounded-lg p-1.5 text-danger-600 hover:bg-danger-50 dark:hover:bg-danger-500/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRowToDelete(r);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 
