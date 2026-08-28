@@ -62,12 +62,14 @@ export function daysBetween(from, to = new Date()) {
   return Math.floor((b.setHours(0, 0, 0, 0) - a.setHours(0, 0, 0, 0)) / 86400000);
 }
 
-// No "Current" (not-yet-due) bucket — anything not yet overdue still falls
-// into 0-30 alongside mildly overdue bills, per spec.
-export function agingBucket(overdueDays) {
-  if (overdueDays <= 30) return '0-30 Days';
-  if (overdueDays <= 60) return '30-60 Days';
-  if (overdueDays <= 90) return '60-90 Days';
+// Half-open buckets on age = as-of date − bill date, so a bill sitting
+// exactly on a boundary (e.g. 30 days old) rolls into the older bucket
+// instead of double-counting at both edges: 0-30 is [0,30), 30-60 is
+// [30,60), 60-90 is [60,90), 90+ is [90,∞).
+export function agingBucket(ageDays) {
+  if (ageDays < 30) return '0-30 Days';
+  if (ageDays < 60) return '30-60 Days';
+  if (ageDays < 90) return '60-90 Days';
   return 'Above 90 Days';
 }
 

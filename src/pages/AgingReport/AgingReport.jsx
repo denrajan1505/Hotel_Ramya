@@ -7,7 +7,7 @@ import '../../components/charts/chartSetup';
 import { CHART_COLORS } from '../../components/charts/chartSetup';
 import { listInvoices } from '../../services/invoiceService';
 import { CATEGORY_TABS } from '../../constants/categories';
-import { formatCurrency, daysBetween, agingBucket, toDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, daysBetween, agingBucket, toDate, localDateKey } from '../../utils/formatters';
 
 const BUCKETS = ['0-30 Days', '30-60 Days', '60-90 Days', 'Above 90 Days'];
 const BUCKET_COLORS = [CHART_COLORS.warning, '#f0942a', CHART_COLORS.danger, '#991b1b'];
@@ -18,9 +18,11 @@ export default function AgingReport() {
   const [customerFilter, setCustomerFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDateVal, setToDateVal] = useState('');
+  const [asOfDate, setAsOfDate] = useState(() => localDateKey(new Date()));
   const hasActiveFilters = Boolean(category || customerFilter || fromDate || toDateVal);
 
   const rows = useMemo(() => {
+    const asOf = toDate(asOfDate) || new Date();
     const list = (invoices || []).filter((inv) => {
       if (!(inv.outstanding > 0)) return false;
       if (category && inv.category !== category) return false;
@@ -31,10 +33,10 @@ export default function AgingReport() {
       return true;
     });
     return list.map((inv) => {
-      const overdueDays = daysBetween(inv.dueDate, new Date());
-      return { ...inv, overdueDays, bucket: agingBucket(overdueDays) };
+      const ageDays = daysBetween(inv.businessDate, asOf);
+      return { ...inv, ageDays, bucket: agingBucket(ageDays) };
     });
-  }, [invoices, category, customerFilter, fromDate, toDateVal]);
+  }, [invoices, category, customerFilter, fromDate, toDateVal, asOfDate]);
 
   const bucketTotals = useMemo(() => {
     const totals = Object.fromEntries(BUCKETS.map((b) => [b, 0]));
@@ -58,9 +60,13 @@ export default function AgingReport() {
 
   return (
     <div>
-      <PageHeader title="Aging Report" subtitle="Outstanding balances grouped by overdue period" />
+      <PageHeader title="Aging Report" subtitle="Outstanding balances grouped by age since bill date, as of the selected ageing date" />
 
       <div className="glass-card mb-4 flex flex-wrap items-end gap-3 p-4">
+        <div>
+          <label className="label !mb-1">Ageing Date</label>
+          <input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className="input !w-auto" />
+        </div>
         <div>
           <label className="label !mb-1">Category</label>
           <select value={category} onChange={(e) => setCategory(e.target.value)} className="input !w-auto">
@@ -129,8 +135,9 @@ export default function AgingReport() {
           { key: 'customerName', header: 'Customer' },
           { key: 'billNumber', header: 'Invoice No' },
           { key: 'category', header: 'Category' },
+          { key: 'businessDate', header: 'Bill Date', render: (r) => formatDate(r.businessDate) },
           { key: 'outstanding', header: 'Outstanding', align: 'right', render: (r) => formatCurrency(r.outstanding) },
-          { key: 'overdueDays', header: 'Overdue Days', align: 'right' },
+          { key: 'ageDays', header: 'Age (Days)', align: 'right' },
           { key: 'bucket', header: 'Bucket' },
         ]}
       />
