@@ -7,8 +7,7 @@ import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
-import BulkSettlementModal from '../../components/invoices/BulkSettlementModal';
-import { Trash2, Landmark } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { listInvoices, updateInvoice, setInvoiceCategory, deleteInvoicesBulk, deleteInvoice } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr, reverseInvoicePayment } from '../../services/invoicePaymentService';
@@ -38,7 +37,6 @@ export default function Invoices() {
   const [deleteDate, setDeleteDate] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowToDelete, setRowToDelete] = useState(null);
-  const [bulkOpen, setBulkOpen] = useState(false);
 
   const filtered = useMemo(() => {
     let list;
@@ -105,12 +103,6 @@ export default function Invoices() {
             </button>
           ))}
         </div>
-
-        {canRecordPayment && (
-          <button type="button" className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => setBulkOpen(true)}>
-            <Landmark size={14} /> Settle Multiple Bills (One UTR)
-          </button>
-        )}
 
         {canDelete && (
           <div className="flex items-center gap-2">
@@ -230,18 +222,6 @@ export default function Invoices() {
         canManageCategory={can('MANAGE_INVOICE_CATEGORY')}
         canReverse={can('DELETE_FINANCIAL_RECORDS')}
         user={user}
-      />
-
-      <BulkSettlementModal
-        open={bulkOpen}
-        onClose={() => setBulkOpen(false)}
-        invoices={invoices || []}
-        user={user}
-        onDone={() => {
-          queryClient.invalidateQueries({ queryKey: ['invoices'] });
-          queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
-          invalidateDashboard(queryClient);
-        }}
       />
     </div>
   );
