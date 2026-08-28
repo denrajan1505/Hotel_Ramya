@@ -8,9 +8,9 @@ import StatusBadge from '../../components/common/StatusBadge';
 import Modal from '../../components/common/Modal';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import { Trash2 } from 'lucide-react';
-import { listInvoices, setInvoiceCategory, deleteInvoicesBulk, deleteInvoice } from '../../services/invoiceService';
+import { listInvoices, updateInvoice, setInvoiceCategory, deleteInvoicesBulk, deleteInvoice } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
-import { recordInvoicePayment, updateInvoiceUtr } from '../../services/invoicePaymentService';
+import { recordInvoicePayment, updateInvoiceUtr, reverseInvoicePayment } from '../../services/invoicePaymentService';
 import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS, INVOICE_STATUS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, localDateKey } from '../../utils/formatters';
@@ -219,13 +219,14 @@ export default function Invoices() {
         onClose={() => setSelected(null)}
         canRecordPayment={can('RECORD_PAYMENTS')}
         canManageCategory={can('MANAGE_INVOICE_CATEGORY')}
+        canReverse={can('DELETE_FINANCIAL_RECORDS')}
         user={user}
       />
     </div>
   );
 }
 
-function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCategory, user }) {
+function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCategory, canReverse, user }) {
   const queryClient = useQueryClient();
   const { data: allocations } = useQuery({
     queryKey: ['invoice-allocations', invoice?.id],
@@ -240,6 +241,33 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       invalidateDashboard(queryClient);
       toast.success('Bill categorised.');
+      onClose();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Pre-filled from the invoice's own saved date, never from today — only
+  // changes if the user explicitly edits it and clicks Save.
+  const [businessDateInput, setBusinessDateInput] = useState(() => localDateKey(invoice?.businessDate) || '');
+  const businessDateMutation = useMutation({
+    mutationFn: () => updateInvoice(invoice.id, { businessDate: new Date(`${businessDateInput}T00:00:00`) }, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      invalidateDashboard(queryClient);
+      toast.success('Bill date updated.');
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const [reverseConfirmOpen, setReverseConfirmOpen] = useState(false);
+  const reverseMutation = useMutation({
+    mutationFn: () => reverseInvoicePayment({ invoice, user }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
+      invalidateDashboard(queryClient);
+      toast.success(`Payment reversed — ${invoice.billNumber} is Unpaid again.`);
+      setReverseConfirmOpen(false);
       onClose();
     },
     onError: (err) => toast.error(err.message),
@@ -292,6 +320,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   return (
     <Modal open={Boolean(invoice)} onClose={onClose} title={`Invoice ${invoice.billNumber}`} size="lg">
       <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
+        <Field label="Bill Date" value={formatDate(invoice.businessDate)} />
         <Field label="Guest Name" value={invoice.guestName} />
         <Field label="Company (from bill)" value={invoice.companyName || '—'} />
         <Field label="Room No" value={invoice.roomNumber} />
@@ -301,6 +330,22 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         <Field label="Reference" value={invoice.referenceName || '—'} />
         <Field label="Status" value={<StatusBadge value={invoice.status} />} />
       </div>
+
+      {canManageCategory && (
+        <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+          <div>
+            <label className="label">Bill Date</label>
+            <input type="date" className="input !w-auto" value={businessDateInput} onChange={(e) => setBusinessDateInput(e.target.value)} />
+          </div>
+          <button
+            className="btn-outline !px-3 !py-1.5 text-xs"
+            disabled={businessDateMutation.isPending || !businessDateInput || businessDateInput === localDateKey(invoice.businessDate)}
+            onClick={() => businessDateMutation.mutate()}
+          >
+            Save Bill Date
+          </button>
+        </div>
+      )}
 
       <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Category</h4>
       <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
@@ -340,6 +385,32 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         {invoice.adjustment > 0 && <Money label="Adjustment" value={invoice.adjustment} />}
         <Money label="Outstanding" value={invoice.outstanding} highlight />
       </div>
+
+      {invoice.paymentType && canReverse && (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-200 bg-danger-50/50 p-4 dark:border-danger-500/30 dark:bg-danger-500/10">
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            This bill has a recorded settlement ({invoice.paymentType}, {formatDate(invoice.paymentDate)}, {formatCurrency(invoice.paymentAmount)}
+            {invoice.utrNumber ? `, UTR ${invoice.utrNumber}` : ''}). Reverting removes it from the Journal Ledger, restores the outstanding
+            balance, and reopens the bill so it can be settled again correctly.
+          </p>
+          <button className="btn-danger !px-3 !py-1.5 text-xs shrink-0" onClick={() => setReverseConfirmOpen(true)}>
+            Revert to Unpaid
+          </button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={reverseConfirmOpen}
+        onClose={() => setReverseConfirmOpen(false)}
+        onConfirm={() => reverseMutation.mutate()}
+        title="Revert Bill to Unpaid?"
+        danger
+        confirmLabel="Revert to Unpaid"
+        loading={reverseMutation.isPending}
+        message={`This will undo the recorded settlement on bill ${invoice.billNumber} (${formatCurrency(invoice.paymentAmount)} on ${formatDate(
+          invoice.paymentDate,
+        )}), restore its outstanding balance, remove it from its Journal Ledger voucher, and reverse the customer's credit account by the same amount. The bill amount and bill date are not changed. No other bill is affected.`}
+      />
 
       <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment</h4>
       {invoice.outstanding > 0 ? (

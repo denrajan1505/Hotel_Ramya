@@ -2,7 +2,7 @@ import { doc, collection, getDocs, query, where, orderBy, runTransaction, server
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../constants/collections';
 import { SETTLEMENT_ACCOUNTS } from '../constants/categories';
-import { deriveInvoiceStatus } from '../utils/balanceCalculations';
+import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -254,6 +254,106 @@ export async function updateInvoiceUtr({ invoice, utrNumber, user }) {
     invoiceNumber: invoice.billNumber,
     utrNumber: trimmedUtr,
   });
+}
+
+/**
+ * Undoes the currently-recorded settlement on a bill — the inverse of
+ * recordInvoicePayment. `creditLines`/`paymentAmount` on the invoice always
+ * reflect only the most recent settlement call (they're overwritten, not
+ * appended, same as recordInvoicePayment writes them), so reversing exactly
+ * those fields correctly undoes "the settlement" regardless of how it was
+ * split across accounts. received/tds/tcs/commission are cumulative, so only
+ * this settlement's own bucketed contribution is subtracted back out, then
+ * outstanding/status are recomputed the same way recordInvoicePayment does.
+ * The bill's line is removed from its Journal Ledger voucher (deleting the
+ * voucher if this was its only bill), and the customer's credit account is
+ * adjusted by the same delta. Bill amount, business date, and every other
+ * bill/voucher are untouched.
+ */
+export async function reverseInvoicePayment({ invoice, user }) {
+  if (!invoice.paymentType) throw new Error('This bill has no recorded settlement to reverse.');
+
+  const invoiceRef = doc(db, COLLECTIONS.INVOICES, invoice.id);
+  const journalRef = invoice.journalEntryId ? doc(db, COLLECTIONS.JOURNAL_LEDGER, invoice.journalEntryId) : null;
+
+  const result = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(invoiceRef);
+    if (!snap.exists()) throw new Error('Invoice not found.');
+    const journalSnap = journalRef ? await tx.get(journalRef) : null;
+    const inv = snap.data();
+
+    const bucketTotals = { received: 0, tds: 0, tcs: 0, commission: 0 };
+    for (const line of inv.creditLines || []) {
+      const meta = ACCOUNTS_BY_KEY.get(line.account);
+      const bucket = meta?.bucket || 'received';
+      bucketTotals[bucket] = round2(bucketTotals[bucket] + (Number(line.amount) || 0));
+    }
+
+    const newReceived = round2((inv.received || 0) - bucketTotals.received);
+    const newTds = round2((inv.tds || 0) - bucketTotals.tds);
+    const newTcs = round2((inv.tcs || 0) - bucketTotals.tcs);
+    const newCommission = round2((inv.commission || 0) - bucketTotals.commission);
+
+    const outstanding = calculateOutstanding(inv, {
+      received: newReceived,
+      tds: newTds,
+      tcs: newTcs,
+      commission: newCommission,
+      adjustment: inv.adjustment,
+    });
+    const status = deriveInvoiceStatus(outstanding, inv.billAmount, inv.dueDate);
+    const creditAccountDelta = round2(outstanding - Number(inv.outstanding || 0));
+
+    tx.update(invoiceRef, {
+      received: newReceived,
+      tds: newTds,
+      tcs: newTcs,
+      commission: newCommission,
+      outstanding,
+      status,
+      paymentType: null,
+      creditLines: [],
+      paymentDate: null,
+      paymentAmount: null,
+      utrNumber: '',
+      journalEntryId: null,
+      paidAt: null,
+      paidBy: null,
+      paidByName: null,
+    });
+
+    if (inv.customerId && creditAccountDelta !== 0) {
+      tx.set(doc(db, COLLECTIONS.CREDIT_ACCOUNTS, inv.customerId), { currentOutstanding: increment(creditAccountDelta) }, { merge: true });
+    }
+
+    if (journalRef && journalSnap?.exists()) {
+      const remainingBills = (journalSnap.data().bills || []).filter((b) => b.invoiceId !== invoice.id);
+      if (remainingBills.length) {
+        tx.set(journalRef, { bills: remainingBills, ...aggregateBills(remainingBills), updatedAt: serverTimestamp() }, { merge: true });
+      } else {
+        tx.delete(journalRef);
+      }
+    }
+
+    return { reversedAmount: inv.paymentAmount || 0, reversedCreditLines: inv.creditLines || [] };
+  });
+
+  await logAudit({
+    user,
+    action: 'Invoice Payment Reversed',
+    module: 'Invoices',
+    invoiceNumber: invoice.billNumber,
+    oldValue: {
+      paymentType: invoice.paymentType,
+      paymentAmount: invoice.paymentAmount,
+      paymentDate: invoice.paymentDate,
+      utrNumber: invoice.utrNumber,
+      creditLines: invoice.creditLines,
+    },
+    newValue: { status: 'Reopened' },
+  });
+
+  return result;
 }
 
 export async function listJournalLedger() {
