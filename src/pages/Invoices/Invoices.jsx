@@ -14,7 +14,7 @@ import { recordInvoicePayment, updateInvoiceUtr, reverseInvoicePayment } from '.
 import { listActiveReferencePersons } from '../../services/referencePersonService';
 import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS, INVOICE_STATUS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
-import { formatCurrency, formatDate, localDateKey } from '../../utils/formatters';
+import { formatCurrency, formatDate, localDateKey, addDays, daysBetween } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -423,6 +423,55 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         <Money label="Outstanding" value={invoice.outstanding} highlight />
       </div>
 
+      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Bill Status</h4>
+      <div className="space-y-2 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+        <BillStatusRow
+          label="Courier Sent"
+          invoice={invoice}
+          user={user}
+          canEdit={canManageCategory}
+          scheduledDate={addDays(invoice.businessDate, 2)}
+          dateField="courierSentDate"
+          reasonField="courierReason"
+        />
+        <BillStatusRow
+          label="Mail Sent"
+          invoice={invoice}
+          user={user}
+          canEdit={canManageCategory}
+          scheduledDate={addDays(invoice.businessDate, 0)}
+          dateField="mailSentDate"
+          reasonField="mailReason"
+        />
+        <BillStatusRow
+          label="Follow-up 1"
+          invoice={invoice}
+          user={user}
+          canEdit={canManageCategory}
+          scheduledDate={addDays(invoice.businessDate, 5)}
+          dateField="followUp1Date"
+          reasonField="followUp1Reason"
+        />
+        <BillStatusRow
+          label="Follow-up 2"
+          invoice={invoice}
+          user={user}
+          canEdit={canManageCategory}
+          scheduledDate={addDays(invoice.businessDate, 20)}
+          dateField="followUp2Date"
+          reasonField="followUp2Reason"
+        />
+        <BillStatusRow
+          label="Escalation"
+          invoice={invoice}
+          user={user}
+          canEdit={canManageCategory}
+          scheduledDate={addDays(invoice.businessDate, 35)}
+          dateField="escalationDate"
+          reasonField="escalationReason"
+        />
+      </div>
+
       {invoice.paymentType && canReverse && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-200 bg-danger-50/50 p-4 dark:border-danger-500/30 dark:bg-danger-500/10">
           <p className="text-xs text-slate-600 dark:text-slate-300">
@@ -613,6 +662,76 @@ function Money({ label, value, highlight }) {
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
       <p className={clsx('mt-0.5 font-semibold', highlight ? 'text-danger-600' : 'text-slate-700 dark:text-slate-200')}>{formatCurrency(value)}</p>
+    </div>
+  );
+}
+
+/**
+ * One Bill Status row (Courier Sent / Mail Sent / Follow-up 1 / Follow-up 2 /
+ * Escalation). Scheduled Date is always derived from the bill date — never
+ * stored, never user-editable — per spec. "Late" is true only once an actual
+ * date has been entered and it falls after the scheduled date; only then is
+ * a reason required to save.
+ */
+function BillStatusRow({ label, invoice, user, canEdit, scheduledDate, dateField, reasonField }) {
+  const queryClient = useQueryClient();
+  const savedDateKey = localDateKey(invoice[dateField]) || '';
+  const savedReason = invoice[reasonField] || '';
+  const [dateInput, setDateInput] = useState(savedDateKey);
+  const [reasonInput, setReasonInput] = useState(savedReason);
+
+  const actualDate = dateInput ? new Date(`${dateInput}T00:00:00`) : null;
+  const isLate = Boolean(actualDate && scheduledDate && daysBetween(scheduledDate, actualDate) > 0);
+  const dirty = dateInput !== savedDateKey || reasonInput.trim() !== savedReason;
+  const canSave = Boolean(dateInput) && (!isLate || reasonInput.trim()) && dirty;
+
+  const mutation = useMutation({
+    mutationFn: () => updateInvoice(invoice.id, { [dateField]: actualDate, [reasonField]: reasonInput.trim() }, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success(`${label} updated.`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  return (
+    <div
+      className={clsx(
+        'grid grid-cols-2 gap-2 rounded-lg p-3 text-sm sm:grid-cols-5 sm:items-center',
+        isLate ? 'border border-danger-200 bg-danger-50/50 dark:border-danger-500/30 dark:bg-danger-500/10' : 'bg-white dark:bg-white/5',
+      )}
+    >
+      <div className="font-medium text-slate-700 dark:text-slate-200">
+        {label}
+        {isLate && <span className="ml-2 text-xs font-semibold text-danger-600">● Late</span>}
+      </div>
+      <div>
+        <p className="text-xs text-slate-400 sm:hidden">Scheduled</p>
+        <p>{scheduledDate ? formatDate(scheduledDate) : '—'}</p>
+      </div>
+      {canEdit ? (
+        <input type="date" className="input !py-1 !text-sm" value={dateInput} onChange={(e) => setDateInput(e.target.value)} />
+      ) : (
+        <div>
+          <p className="text-xs text-slate-400 sm:hidden">Actual</p>
+          <p>{dateInput ? formatDate(actualDate) : '—'}</p>
+        </div>
+      )}
+      {canEdit ? (
+        <input
+          className="input !py-1 !text-sm"
+          placeholder={isLate ? 'Reason (required — late)' : 'Reason (optional)'}
+          value={reasonInput}
+          onChange={(e) => setReasonInput(e.target.value)}
+        />
+      ) : (
+        <p>{reasonInput || '—'}</p>
+      )}
+      {canEdit && (
+        <button className="btn-outline !px-3 !py-1.5 text-xs" disabled={!canSave || mutation.isPending} onClick={() => mutation.mutate()}>
+          Update
+        </button>
+      )}
     </div>
   );
 }

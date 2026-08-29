@@ -62,6 +62,14 @@ export function daysBetween(from, to = new Date()) {
   return Math.floor((b.setHours(0, 0, 0, 0) - a.setHours(0, 0, 0, 0)) / 86400000);
 }
 
+export function addDays(value, days) {
+  const date = toDate(value);
+  if (!date) return null;
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
 // Half-open buckets on age = as-of date − bill date, so a bill sitting
 // exactly on a boundary (e.g. 30 days old) rolls into the older bucket
 // instead of double-counting at both edges: 0-30 is [0,30), 30-60 is
