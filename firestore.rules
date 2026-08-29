@@ -146,6 +146,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /referencePersons/{id} {
+      allow read: if canRead();
+      allow write: if isAdmin() || isCreditOfficer();
+    }
+
     match /counters/{id} {
       allow read: if canRead();
       allow write: if canOperate();
