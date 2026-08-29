@@ -12,6 +12,7 @@ export const COLLECTIONS = {
   JOURNAL_LEDGER: 'journalLedger',
   ADJUSTMENTS: 'adjustments',
   DEPARTMENTS: 'departments',
+  REFERENCE_PERSONS: 'referencePersons',
   AUDIT_LOGS: 'auditLogs',
   NOTIFICATIONS: 'notifications',
   SETTINGS: 'settings',

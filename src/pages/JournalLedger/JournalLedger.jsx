@@ -75,7 +75,12 @@ export default function JournalLedger() {
       const bankDate = entry.paymentDate;
 
       const drLines = bills.length
-        ? bills.map((b) => `${b.billNumber}${b.isPartial ? ' (part payment)' : ''} — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}`)
+        ? bills.map(
+            (b) =>
+              `${b.billNumber}${b.isPartial ? ' (part payment)' : ''} — ${formatCurrency(b.debitAmount ?? b.settleAmount ?? b.amount)}${
+                b.referenceName ? `  [Ref: ${b.referenceName}]` : ''
+              }`,
+          )
         : [`—`];
       const crLines = creditTotals.length
         ? creditTotals.map((c, i) => `${c.label || c.account} — ${formatCurrency(c.amount)}${i === 0 && bankDate ? `  (NEFT dated ${formatDate(bankDate)})` : ''}`)

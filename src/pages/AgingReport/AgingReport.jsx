@@ -133,6 +133,7 @@ export default function AgingReport() {
         exportFilename="aging-report"
         columns={[
           { key: 'customerName', header: 'Customer' },
+          { key: 'referenceName', header: 'Reference', render: (r) => r.referenceName || '—' },
           { key: 'billNumber', header: 'Invoice No' },
           { key: 'category', header: 'Category' },
           { key: 'businessDate', header: 'Bill Date', render: (r) => formatDate(r.businessDate) },

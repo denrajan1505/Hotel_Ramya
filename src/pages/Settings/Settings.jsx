@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, DatabaseBackup, Sparkles, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, DatabaseBackup, Sparkles, RefreshCw, Pencil, Check, X, Ban, RotateCcw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/common/PageHeader';
 import { listDepartments, createDepartment, deleteDepartment } from '../../services/departmentService';
 import { seedCustomersIfEmpty, recalculateCreditAccountBalances } from '../../services/customerService';
+import { listReferencePersons, createReferencePerson, updateReferencePerson, deleteReferencePerson } from '../../services/referencePersonService';
 import { downloadFullBackup } from '../../services/backupService';
 import { useAuth } from '../../context/AuthContext';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
@@ -26,6 +27,20 @@ export default function Settings() {
   const removeDepartment = async (id) => {
     await deleteDepartment(id, user);
     queryClient.invalidateQueries({ queryKey: ['departments'] });
+  };
+
+  const { data: referencePersons, isLoading: referencePersonsLoading } = useQuery({
+    queryKey: ['reference-persons'],
+    queryFn: listReferencePersons,
+  });
+  const [newReferencePerson, setNewReferencePerson] = useState('');
+  const refreshReferencePersons = () => queryClient.invalidateQueries({ queryKey: ['reference-persons'] });
+
+  const addReferencePerson = async () => {
+    if (!newReferencePerson.trim()) return;
+    await createReferencePerson(newReferencePerson.trim(), user);
+    setNewReferencePerson('');
+    refreshReferencePersons();
   };
 
   const handleSeed = async () => {
@@ -94,6 +109,35 @@ export default function Settings() {
           </ul>
         </div>
 
+        {can('MANAGE_REFERENCE_PERSONS') && (
+          <div className="glass-card p-5">
+            <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Reference Persons</h3>
+            <p className="mb-4 text-xs text-slate-400">
+              The people bills are attributed to alongside the customer name (e.g. "ABC Travels — Ref: Mr. Rajesh"). Deactivate one to hide it from
+              the picker without losing it from bills that already reference it.
+            </p>
+            <div className="mb-3 flex gap-2">
+              <input
+                value={newReferencePerson}
+                onChange={(e) => setNewReferencePerson(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addReferencePerson()}
+                placeholder="e.g. Mr. Rajesh"
+                className="input"
+              />
+              <button onClick={addReferencePerson} className="btn-primary shrink-0">
+                <Plus size={15} /> Add
+              </button>
+            </div>
+            <ul className="space-y-1.5">
+              {referencePersonsLoading && <p className="text-sm text-slate-400">Loading…</p>}
+              {(referencePersons || []).length === 0 && !referencePersonsLoading && <p className="text-sm text-slate-400">No reference persons yet.</p>}
+              {(referencePersons || []).map((p) => (
+                <ReferencePersonRow key={p.id} person={p} user={user} onChange={refreshReferencePersons} />
+              ))}
+            </ul>
+          </div>
+        )}
+
         {can('MANAGE_CUSTOMERS') && (
           <div className="glass-card p-5">
             <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Customer Master Quick-Start</h3>
@@ -131,5 +175,92 @@ export default function Settings() {
         )}
       </div>
     </div>
+  );
+}
+
+function ReferencePersonRow({ person, user, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(person.name);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await updateReferencePerson(person.id, { name: name.trim() }, user);
+      setEditing(false);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async () => {
+    setBusy(true);
+    try {
+      await updateReferencePerson(person.id, { active: person.active === false }, user);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await deleteReferencePerson(person.id, user);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <li className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-white/5">
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && save()}
+          className="input !py-1"
+        />
+        <button onClick={save} disabled={busy} className="text-success-600 hover:text-success-700">
+          <Check size={15} />
+        </button>
+        <button
+          onClick={() => {
+            setName(person.name);
+            setEditing(false);
+          }}
+          className="text-slate-400 hover:text-slate-600"
+        >
+          <X size={15} />
+        </button>
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-white/5">
+      <span className={person.active === false ? 'text-slate-400 line-through' : ''}>{person.name}</span>
+      <div className="flex items-center gap-2">
+        {person.active === false && <span className="text-xs text-slate-400">Inactive</span>}
+        <button onClick={() => setEditing(true)} disabled={busy} title="Rename" className="text-slate-400 hover:text-primary-600">
+          <Pencil size={14} />
+        </button>
+        <button
+          onClick={toggleActive}
+          disabled={busy}
+          title={person.active === false ? 'Reactivate' : 'Deactivate'}
+          className="text-slate-400 hover:text-warning-600"
+        >
+          {person.active === false ? <RotateCcw size={14} /> : <Ban size={14} />}
+        </button>
+        <button onClick={remove} disabled={busy} title="Delete" className="text-slate-400 hover:text-danger-500">
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </li>
   );
 }

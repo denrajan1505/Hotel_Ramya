@@ -97,6 +97,7 @@ export default function OutstandingReport() {
           { key: 'businessDate', header: 'Date', render: (r) => formatDate(r.businessDate) },
           { key: 'billNumber', header: 'Invoice No' },
           { key: 'customerName', header: 'Customer' },
+          { key: 'referenceName', header: 'Reference', render: (r) => r.referenceName || '—' },
           { key: 'category', header: 'Category', render: (r) => <StatusBadge value={r.category} /> },
           { key: 'billAmount', header: 'Bill Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) },
           { key: 'outstanding', header: 'Outstanding', align: 'right', render: (r) => formatCurrency(r.outstanding) },

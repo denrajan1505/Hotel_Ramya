@@ -11,6 +11,7 @@ import { Trash2 } from 'lucide-react';
 import { listInvoices, updateInvoice, setInvoiceCategory, deleteInvoicesBulk, deleteInvoice } from '../../services/invoiceService';
 import { listPaymentAllocationsForInvoice } from '../../services/paymentService';
 import { recordInvoicePayment, updateInvoiceUtr, reverseInvoicePayment } from '../../services/invoicePaymentService';
+import { listActiveReferencePersons } from '../../services/referencePersonService';
 import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS, INVOICE_STATUS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, localDateKey } from '../../utils/formatters';
@@ -166,6 +167,7 @@ export default function Invoices() {
           { key: 'billNumber', header: 'Bill No' },
           { key: 'businessDate', header: 'Date', render: (r) => formatDate(r.businessDate) },
           { key: 'customerName', header: 'Customer' },
+          { key: 'referenceName', header: 'Reference', render: (r) => r.referenceName || '—' },
           { key: 'category', header: 'Category', render: (r) => <StatusBadge value={r.category} /> },
           { key: 'billAmount', header: 'Bill Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) },
           { key: 'received', header: 'Received Amount', align: 'right', render: (r) => formatCurrency(r.received) },
@@ -260,6 +262,17 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
     onError: (err) => toast.error(err.message),
   });
 
+  const { data: referencePersons } = useQuery({ queryKey: ['reference-persons-active'], queryFn: listActiveReferencePersons, enabled: canManageCategory });
+  const [referenceInput, setReferenceInput] = useState(invoice?.referenceName || '');
+  const referenceMutation = useMutation({
+    mutationFn: () => updateInvoice(invoice.id, { referenceName: referenceInput.trim() }, user),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success('Reference updated.');
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const [reverseConfirmOpen, setReverseConfirmOpen] = useState(false);
   const reverseMutation = useMutation({
     mutationFn: () => reverseInvoicePayment({ invoice, user }),
@@ -344,6 +357,29 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
             onClick={() => businessDateMutation.mutate()}
           >
             Save Bill Date
+          </button>
+
+          <div className="ml-auto min-w-[14rem]">
+            <label className="label">Reference</label>
+            <input
+              list="reference-person-options"
+              className="input"
+              placeholder="Select or type a reference person"
+              value={referenceInput}
+              onChange={(e) => setReferenceInput(e.target.value)}
+            />
+            <datalist id="reference-person-options">
+              {(referencePersons || []).map((p) => (
+                <option key={p.id} value={p.name} />
+              ))}
+            </datalist>
+          </div>
+          <button
+            className="btn-outline !px-3 !py-1.5 text-xs"
+            disabled={referenceMutation.isPending || referenceInput.trim() === (invoice.referenceName || '')}
+            onClick={() => referenceMutation.mutate()}
+          >
+            Save Reference
           </button>
         </div>
       )}
