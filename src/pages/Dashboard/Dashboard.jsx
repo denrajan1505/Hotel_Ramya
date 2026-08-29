@@ -18,12 +18,15 @@ import {
 } from '../../services/dashboardService';
 import { fetchRecentAuditLogs } from '../../services/auditService';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
+import { useAuth } from '../../context/AuthContext';
 
-function useCard(key, fn) {
-  return useQuery({ queryKey: [key], queryFn: fn });
+function useCard(key, fn, options = {}) {
+  return useQuery({ queryKey: [key], queryFn: fn, ...options });
 }
 
 export default function Dashboard() {
+  const { can } = useAuth();
+  const canViewAuditLogs = can('VIEW_AUDIT_LOGS');
   const summary = useCard('dashboard-summary', fetchSummaryCards);
   const monthly = useCard('dashboard-monthly', () => fetchMonthlyCollections(6));
   const trend = useCard('dashboard-trend', () => fetchOutstandingTrend(6));
@@ -31,7 +34,7 @@ export default function Dashboard() {
   const recentPayments = useCard('dashboard-recent-payments', () => fetchRecentPayments(8));
   const upcomingDue = useCard('dashboard-upcoming-due', () => fetchUpcomingDuePayments(8));
   const topOutstanding = useCard('dashboard-top-outstanding', () => fetchTopOutstandingCustomers(8));
-  const recentActivity = useCard('dashboard-recent-activity', () => fetchRecentAuditLogs(10));
+  const recentActivity = useCard('dashboard-recent-activity', () => fetchRecentAuditLogs(10), { enabled: canViewAuditLogs });
 
   const s = summary.data || {};
 
@@ -107,7 +110,9 @@ export default function Dashboard() {
         </div>
         <div className="glass-card p-5">
           <h3 className="mb-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Recent Activity</h3>
-          {recentActivity.isLoading ? (
+          {!canViewAuditLogs ? (
+            <p className="text-sm text-slate-400">Only Administrators can view audit activity.</p>
+          ) : recentActivity.isLoading ? (
             <Loader />
           ) : (
             <ul className="app-scrollbar max-h-64 space-y-3 overflow-y-auto text-sm">
