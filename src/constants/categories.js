@@ -56,6 +56,23 @@ export const INVOICE_STATUS = {
   OVERDUE: 'Overdue',
 };
 
+// Approval workflow status — separate from INVOICE_STATUS above, which
+// tracks payment/outstanding state. This tracks whether a bill has been
+// reviewed by the person responsible for bill approval.
+export const APPROVAL_STATUS = {
+  PENDING: 'Pending',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+};
+
+export const APPROVAL_STATUS_OPTIONS = Object.values(APPROVAL_STATUS);
+
+// The three categories shown on the Bill Approval Status page. Portal bills
+// are explicitly excluded per spec; Unclassified bills don't belong to any
+// of the three yet, so they stay off this page too.
+export const APPROVAL_STATUS_CATEGORIES = [CATEGORIES.COMPANY, CATEGORIES.INDIVIDUAL, CATEGORIES.TRAVEL];
+
 export const PAYMENT_MODES = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Card', 'Credit Card', 'Razorpay', 'Cheque', 'Cash', 'Cash Deposit', 'Other'];
 
 // Settlement accounts selectable as a Journal Ledger credit line when

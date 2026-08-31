@@ -44,6 +44,10 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
 
+    function changedFields() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
     // Everything below runs entirely client-side (Spark/free plan — no
     // Cloud Functions, no Admin SDK). Two spots intentionally trade a small
     // amount of strictness for that:
@@ -100,7 +104,12 @@ service cloud.firestore {
 
     match /invoices/{id} {
       allow read: if canRead();
-      allow create, update: if isAdmin() || isCreditOfficer() || isAccounts();
+      allow create: if isAdmin() || isCreditOfficer() || isAccounts();
+      // Bill Approval Status fields are Admin/Accounts only (per the Bill
+      // Approval Status page spec) — Credit Officer keeps write access to
+      // every other invoice field, same as before.
+      allow update: if isAdmin() || isAccounts() ||
+        (isCreditOfficer() && !changedFields().hasAny(['approvalStatus', 'approvalStatusUpdatedAt', 'approvalStatusUpdatedBy']));
       allow delete: if isAdmin();
     }
 

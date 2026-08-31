@@ -6,6 +6,7 @@ import { classifyInvoiceRow } from '../utils/customerClassification';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { toDate } from '../utils/formatters';
 import { logAudit } from './auditService';
+import { APPROVAL_STATUS } from '../constants/categories';
 
 // FO Cashier Reports vary by property; map several plausible header spellings
 // to the canonical field names the rest of the app relies on.
@@ -333,6 +334,7 @@ export async function commitFoCashierImport({ included, customerMasterList, repl
         commission: 0,
         outstanding,
         status,
+        approvalStatus: APPROVAL_STATUS.PENDING,
         dueDate,
         importDate: now,
         importedBy: user?.displayName || user?.username || 'system',

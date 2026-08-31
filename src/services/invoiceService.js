@@ -4,6 +4,7 @@ import { crudFor, where, orderBy } from './firestoreCrud';
 import { COLLECTIONS } from '../constants/collections';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
+import { APPROVAL_STATUS } from '../constants/categories';
 
 const invoices = crudFor(COLLECTIONS.INVOICES);
 
@@ -41,6 +42,30 @@ export async function updateInvoice(id, data, user) {
     module: 'Invoices',
     oldValue: before,
     newValue: data,
+    invoiceNumber: before?.billNumber,
+  });
+}
+
+/**
+ * Changes a bill's approval status (Pending/Approved/Rejected/Cancelled) from
+ * the Bill Approval Status page — enforced Admin/Accounts-only by Firestore
+ * rules (see MANAGE_BILL_APPROVAL_STATUS), not just the UI gate. Every change
+ * is written to the Audit Trail with the before/after value.
+ */
+export async function updateApprovalStatus(id, approvalStatus, user) {
+  const before = await invoices.get(id);
+  const previousStatus = before?.approvalStatus || APPROVAL_STATUS.PENDING;
+  await invoices.update(id, {
+    approvalStatus,
+    approvalStatusUpdatedAt: serverTimestamp(),
+    approvalStatusUpdatedBy: user?.displayName || user?.username || 'Unknown',
+  });
+  await logAudit({
+    user,
+    action: 'Bill Approval Status Changed',
+    module: 'Bill Approval Status',
+    oldValue: { approvalStatus: previousStatus },
+    newValue: { approvalStatus },
     invoiceNumber: before?.billNumber,
   });
 }
