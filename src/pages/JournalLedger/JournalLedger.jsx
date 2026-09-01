@@ -83,7 +83,7 @@ export default function JournalLedger() {
           )
         : [`—`];
       const crLines = creditTotals.length
-        ? creditTotals.map((c, i) => `${c.label || c.account} — ${formatCurrency(c.amount)}${i === 0 && bankDate ? `  (NEFT dated ${formatDate(bankDate)})` : ''}`)
+        ? creditTotals.map((c, i) => `${c.label || c.account} — ${formatCurrency(c.amount)}${i === 0 && bankDate ? `  (dated ${formatDate(bankDate)})` : ''}`)
         : [`—`];
 
       const particulars = [
