@@ -15,6 +15,9 @@ const STYLES = {
   Individual: 'bg-gold-50 text-gold-700 dark:bg-gold-500/15 dark:text-gold-300',
   Portal: 'bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-300',
   Travel: 'bg-teal-50 text-teal-600 dark:bg-teal-500/15 dark:text-teal-300',
+  Scheduled: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
+  Sent: 'bg-success-50 text-success-600 dark:bg-success-500/10',
+  Delayed: 'bg-danger-50 text-danger-600 dark:bg-danger-500/10',
 };
 
 export default function StatusBadge({ value }) {

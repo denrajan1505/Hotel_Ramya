@@ -18,6 +18,7 @@ const CreditAccounts = lazy(() => import('./pages/CreditAccounts/CreditAccounts'
 const ImportFOCashier = lazy(() => import('./pages/ImportFOCashier/ImportFOCashier'));
 const Invoices = lazy(() => import('./pages/Invoices/Invoices'));
 const BillApprovalStatus = lazy(() => import('./pages/BillApprovalStatus/BillApprovalStatus'));
+const BillStatus = lazy(() => import('./pages/BillStatus/BillStatus'));
 const Payments = lazy(() => import('./pages/Payments/Payments'));
 const BillMatching = lazy(() => import('./pages/BillMatching/BillMatching'));
 const Receipts = lazy(() => import('./pages/Receipts/Receipts'));
@@ -72,6 +73,7 @@ export default function App() {
               />
               <Route path="/invoices" element={<Page><Invoices /></Page>} />
               <Route path="/bill-approval-status" element={<Page><BillApprovalStatus /></Page>} />
+              <Route path="/bill-status" element={<Page><BillStatus /></Page>} />
               <Route
                 path="/payments"
                 element={
