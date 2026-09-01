@@ -6,7 +6,8 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function Sidebar({ open, onNavigate }) {
   const { can } = useAuth();
-  const items = NAV_ITEMS.filter((item) => !item.permission || can(item.permission));
+  const visible = (item) => !item.permission || can(item.permission);
+  const items = NAV_ITEMS.filter(visible).map((item) => (item.children ? { ...item, children: item.children.filter(visible) } : item));
 
   return (
     <aside
@@ -27,23 +28,50 @@ export default function Sidebar({ open, onNavigate }) {
 
       <nav className="app-scrollbar flex-1 overflow-y-auto px-3 py-4">
         <ul className="space-y-1">
-          {items.map(({ to, label, icon: Icon }) => (
-            <li key={to}>
-              <NavLink
-                to={to}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  clsx(
-                    'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
-                    isActive ? 'bg-white/15 text-white shadow-inner' : 'text-primary-100/80 hover:bg-white/10 hover:text-white',
-                  )
-                }
-              >
-                <Icon size={17} />
-                <span className="truncate">{label}</span>
-              </NavLink>
-            </li>
-          ))}
+          {items.map((item) =>
+            item.children ? (
+              <li key={item.label}>
+                <div className="mt-2 flex items-center gap-3 px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-primary-200/70">
+                  <item.icon size={15} />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                <ul className="space-y-1">
+                  {item.children.map((child) => (
+                    <li key={child.to}>
+                      <NavLink
+                        to={child.to}
+                        onClick={onNavigate}
+                        className={({ isActive }) =>
+                          clsx(
+                            'ml-4 flex items-center rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+                            isActive ? 'bg-white/15 text-white shadow-inner' : 'text-primary-100/80 hover:bg-white/10 hover:text-white',
+                          )
+                        }
+                      >
+                        <span className="truncate">{child.label}</span>
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ) : (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    clsx(
+                      'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                      isActive ? 'bg-white/15 text-white shadow-inner' : 'text-primary-100/80 hover:bg-white/10 hover:text-white',
+                    )
+                  }
+                >
+                  <item.icon size={17} />
+                  <span className="truncate">{item.label}</span>
+                </NavLink>
+              </li>
+            ),
+          )}
         </ul>
       </nav>
 

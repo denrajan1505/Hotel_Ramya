@@ -18,7 +18,11 @@ const CreditAccounts = lazy(() => import('./pages/CreditAccounts/CreditAccounts'
 const ImportFOCashier = lazy(() => import('./pages/ImportFOCashier/ImportFOCashier'));
 const Invoices = lazy(() => import('./pages/Invoices/Invoices'));
 const BillApprovalStatus = lazy(() => import('./pages/BillApprovalStatus/BillApprovalStatus'));
-const BillStatus = lazy(() => import('./pages/BillStatus/BillStatus'));
+const BillStatusEmail = lazy(() => import('./pages/BillStatus/Email'));
+const BillStatusCourier = lazy(() => import('./pages/BillStatus/Courier'));
+const FollowUp1 = lazy(() => import('./pages/FollowUp/FollowUp1'));
+const FollowUp2 = lazy(() => import('./pages/FollowUp/FollowUp2'));
+const Escalation = lazy(() => import('./pages/FollowUp/Escalation'));
 const Payments = lazy(() => import('./pages/Payments/Payments'));
 const BillMatching = lazy(() => import('./pages/BillMatching/BillMatching'));
 const Receipts = lazy(() => import('./pages/Receipts/Receipts'));
@@ -73,7 +77,11 @@ export default function App() {
               />
               <Route path="/invoices" element={<Page><Invoices /></Page>} />
               <Route path="/bill-approval-status" element={<Page><BillApprovalStatus /></Page>} />
-              <Route path="/bill-status" element={<Page><BillStatus /></Page>} />
+              <Route path="/bill-status/email" element={<Page><BillStatusEmail /></Page>} />
+              <Route path="/bill-status/courier" element={<Page><BillStatusCourier /></Page>} />
+              <Route path="/follow-up/1" element={<Page><FollowUp1 /></Page>} />
+              <Route path="/follow-up/2" element={<Page><FollowUp2 /></Page>} />
+              <Route path="/follow-up/escalation" element={<Page><Escalation /></Page>} />
               <Route
                 path="/payments"
                 element={
