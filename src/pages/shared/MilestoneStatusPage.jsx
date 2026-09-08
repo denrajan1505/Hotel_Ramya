@@ -8,7 +8,7 @@ import { listInvoices, updateInvoice } from '../../services/invoiceService';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate, localDateKey, addDays, daysBetween } from '../../utils/formatters';
 
-function deliveryStatus(scheduledDate, actualDate) {
+export function deliveryStatus(scheduledDate, actualDate) {
   if (actualDate) return daysBetween(scheduledDate, actualDate) > 0 ? 'Delayed' : 'Sent';
   return scheduledDate && daysBetween(scheduledDate, new Date()) > 0 ? 'Delayed' : 'Scheduled';
 }
@@ -16,7 +16,7 @@ function deliveryStatus(scheduledDate, actualDate) {
 // One milestone's Actual Date + Delay Reason + Update, edited inline right in
 // the table row — no bill needs to be opened, so whoever owns this milestone
 // never sees (or can touch) payment fields.
-function MilestoneUpdateCell({ invoice, user, canEdit, scheduledDate, dateField, reasonField, label }) {
+export function MilestoneUpdateCell({ invoice, user, canEdit, scheduledDate, dateField, reasonField, label }) {
   const queryClient = useQueryClient();
   const savedDateKey = localDateKey(invoice[dateField]) || '';
   const savedReason = invoice[reasonField] || '';
@@ -56,9 +56,10 @@ function MilestoneUpdateCell({ invoice, user, canEdit, scheduledDate, dateField,
 }
 
 /**
- * Generic single-milestone list page — Email, Courier, Follow-Up 1,
- * Follow-Up 2 and Escalation are all this same page with different field
- * names/offsets. Scheduled Date is always derived from the bill date, never
+ * Generic single-milestone list page — Escalation is the only page still
+ * using this directly (Email/Courier and Follow-Up 1/2 are combined onto
+ * MultiMilestoneStatusPage, which reuses deliveryStatus/MilestoneUpdateCell
+ * from here). Scheduled Date is always derived from the bill date, never
  * stored. Deliberately has no payment fields on it at all.
  */
 export default function MilestoneStatusPage({ title, subtitle, offsetDays, dateField, reasonField, label, exportFilename }) {
