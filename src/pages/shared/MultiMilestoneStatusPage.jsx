@@ -39,7 +39,6 @@ export default function MultiMilestoneStatusPage({ title, subtitle, milestones, 
 
   const columns = [
     { key: 'billNumber', header: 'Bill No' },
-    { key: 'roomNumber', header: 'Customer No', render: (r) => r.roomNumber || '—' },
     { key: 'customerName', header: 'Customer', render: (r) => r.customerName || '—' },
     { key: 'businessDate', header: 'Bill Date', render: (r) => formatDate(r.businessDate) },
     ...(showBillAmount ? [{ key: 'billAmount', header: 'Bill Amount', align: 'right', render: (r) => formatCurrency(r.billAmount) }] : []),

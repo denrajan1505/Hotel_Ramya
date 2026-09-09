@@ -71,8 +71,8 @@ export default function ImportFOCashier() {
     try {
       const parsedResult = await parseFoCashierFile(file);
       setParsed(parsedResult);
-      if (parsedResult.validation.valid && parsedResult.businessDates.length) {
-        const dupes = await findExistingBusinessDates(parsedResult.businessDates);
+      if (parsedResult.validation.valid && parsedResult.businessDateDepartments.length) {
+        const dupes = await findExistingBusinessDates(parsedResult.businessDateDepartments);
         setExistingDates(dupes);
       } else {
         setExistingDates([]);
@@ -178,7 +178,7 @@ export default function ImportFOCashier() {
                 <div className="glass-card flex items-start gap-3 border border-warning-200 p-4 dark:border-warning-500/30">
                   <AlertTriangle className="mt-0.5 shrink-0 text-warning-500" size={18} />
                   <p className="text-sm text-slate-600 dark:text-slate-300">
-                    Business date(s) already imported: <strong>{existingDates.join(', ')}</strong>. Importing will ask to replace existing invoices for those dates.
+                    Already imported: <strong>{existingDates.map((d) => d.label).join(', ')}</strong>. Importing will ask to replace existing invoices for those date/department combinations only.
                   </p>
                 </div>
               )}
@@ -249,7 +249,7 @@ export default function ImportFOCashier() {
         onClose={() => setConfirmOpen(false)}
         onConfirm={() => runImport(existingDates)}
         title="Replace existing invoices?"
-        message={`Business date(s) ${existingDates.join(', ')} already have imported invoices. Continuing will delete and replace those invoices with the new file's data.`}
+        message={`${existingDates.map((d) => d.label).join(', ')} already have imported invoices for that department. Continuing will delete and replace only those invoices with the new file's data — other departments on the same date(s) are left untouched.`}
         confirmLabel="Replace & Import"
         danger
         loading={importing}

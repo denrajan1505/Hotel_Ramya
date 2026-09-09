@@ -87,7 +87,6 @@ export default function MilestoneStatusPage({ title, subtitle, offsetDays, dateF
         emptyLabel="No bills found."
         columns={[
           { key: 'billNumber', header: 'Bill No' },
-          { key: 'roomNumber', header: 'Customer No', render: (r) => r.roomNumber || '—' },
           { key: 'customerName', header: 'Customer', render: (r) => r.customerName || '—' },
           { key: 'businessDate', header: 'Bill Date', render: (r) => formatDate(r.businessDate) },
           { key: 'milestoneStatus', header: 'Status', render: (r) => <StatusBadge value={r.milestoneStatus} /> },

@@ -154,7 +154,7 @@ function excelSerialOrDate(value) {
 export async function parseFoCashierFile(file) {
   const { rows } = await readExcelFile(file);
   if (rows.length === 0) {
-    return { headerMap: {}, validation: { valid: false, missing: MANDATORY_FIELDS }, businessDates: [], included: [], excluded: [] };
+    return { headerMap: {}, validation: { valid: false, missing: MANDATORY_FIELDS }, businessDates: [], businessDateDepartments: [], included: [], excluded: [] };
   }
 
   const headerRowIndex = findHeaderRowIndex(rows);
@@ -165,12 +165,13 @@ export async function parseFoCashierFile(file) {
   const hasBillAmountColumn = headerMap.billAmount !== undefined;
   const validation = validateHeaderMap(headerMap, creditModeMap);
   if (!validation.valid) {
-    return { headerMap, validation, businessDates: [], included: [], excluded: [] };
+    return { headerMap, validation, businessDates: [], businessDateDepartments: [], included: [], excluded: [] };
   }
 
   const included = [];
   const excluded = [];
   const businessDateSet = new Set();
+  const dateDepartmentMap = new Map(); // dateStr -> Set of department values seen for that date in this file
 
   for (const row of rows.slice(headerRowIndex + 1)) {
     if (!row || row.every((cell) => String(cell).trim() === '')) continue;
@@ -217,40 +218,59 @@ export async function parseFoCashierFile(file) {
     }
 
     included.push(normalized);
-    businessDateSet.add(toLocalDateKey(normalized.businessDate));
+    const dateKey = toLocalDateKey(normalized.businessDate);
+    businessDateSet.add(dateKey);
+    if (!dateDepartmentMap.has(dateKey)) dateDepartmentMap.set(dateKey, new Set());
+    dateDepartmentMap.get(dateKey).add(normalized.department || '');
   }
 
-  return { headerMap, validation, businessDates: [...businessDateSet].sort(), included, excluded };
+  // One entry per (date, department) combination actually present in this
+  // file — this is the granularity the "already imported" check and the
+  // replace-delete operate on, so importing Restaurant bills for a date never
+  // collides with Room bills already imported for that same date.
+  const businessDateDepartments = [...dateDepartmentMap.entries()].flatMap(([dateStr, departments]) =>
+    [...departments].map((department) => ({ businessDate: dateStr, department })),
+  );
+
+  return { headerMap, validation, businessDates: [...businessDateSet].sort(), businessDateDepartments, included, excluded };
 }
 
-/** Checks which of the parsed business dates already have imported invoices, so the caller can ask for replace-confirmation. */
-export async function findExistingBusinessDates(businessDates) {
+function departmentLabel(department) {
+  return department ? department : '(no department)';
+}
+
+/** Checks which of the parsed (date, department) combinations already have imported invoices, so the caller can ask for replace-confirmation. */
+export async function findExistingBusinessDates(businessDateDepartments) {
   const existing = [];
-  for (const dateStr of businessDates) {
+  for (const { businessDate: dateStr, department } of businessDateDepartments) {
     const start = new Date(`${dateStr}T00:00:00`);
     const end = new Date(`${dateStr}T23:59:59.999`);
     const q = query(
       collection(db, COLLECTIONS.INVOICES),
+      where('department', '==', department),
       where('businessDate', '>=', start),
       where('businessDate', '<=', end),
     );
     const snap = await getDocs(q);
-    if (!snap.empty) existing.push(dateStr);
+    if (!snap.empty) existing.push({ businessDate: dateStr, department, label: `${dateStr} (${departmentLabel(department)})` });
   }
   return existing;
 }
 
-/** Deletes invoices for the given business dates and returns the per-customer
- * NET DELTA to apply to creditAccounts.currentOutstanding for the removal
- * alone (negative — outstanding went away with the deleted invoices), so the
- * caller can add the replacement invoices' own deltas into the same map. */
-async function deleteInvoicesForDates(businessDates) {
+/** Deletes invoices for the given (date, department) combinations and returns
+ * the per-customer NET DELTA to apply to creditAccounts.currentOutstanding
+ * for the removal alone (negative — outstanding went away with the deleted
+ * invoices), so the caller can add the replacement invoices' own deltas into
+ * the same map. Scoped by department so replacing a Restaurant re-upload
+ * never touches that date's Room invoices (or any other department's). */
+async function deleteInvoicesForDates(businessDateDepartments) {
   const creditAccountDelta = new Map();
-  for (const dateStr of businessDates) {
+  for (const { businessDate: dateStr, department } of businessDateDepartments) {
     const start = new Date(`${dateStr}T00:00:00`);
     const end = new Date(`${dateStr}T23:59:59.999`);
     const q = query(
       collection(db, COLLECTIONS.INVOICES),
+      where('department', '==', department),
       where('businessDate', '>=', start),
       where('businessDate', '<=', end),
     );
@@ -282,8 +302,10 @@ function chunkArray(arr, size) {
  * Step 2: commits the previously-parsed rows to Firestore. Runs classification
  * per row against the live Customer Master, computes due date from the
  * matched customer's credit days, and writes in batches of 450 for speed on
- * large imports. Pass `replaceDates` (from findExistingBusinessDates, after
- * user confirmation) to wipe those business dates first.
+ * large imports. Pass `replaceDates` (the {businessDate, department} entries
+ * from findExistingBusinessDates, after user confirmation) to wipe those
+ * exact date+department combinations first — never other departments'
+ * invoices on the same date.
  *
  * Credit account balances are kept in sync client-side (no Cloud Functions
  * trigger available on the Spark plan): every new invoice's starting

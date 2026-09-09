@@ -20,6 +20,14 @@
       "collectionGroup": "invoices",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "department", "order": "ASCENDING" },
+        { "fieldPath": "businessDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "invoices",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "dueDate", "order": "ASCENDING" }
       ]

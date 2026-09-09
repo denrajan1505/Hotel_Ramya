@@ -1,8 +1,8 @@
 import MultiMilestoneStatusPage from '../shared/MultiMilestoneStatusPage';
 
 const MILESTONES = [
-  { key: 'email', label: 'Email', offsetDays: 0, dateField: 'mailSentDate', reasonField: 'mailReason' },
-  { key: 'courier', label: 'Courier', offsetDays: 2, dateField: 'courierSentDate', reasonField: 'courierReason' },
+  { key: 'email', label: 'Email', offsetDays: 2, dateField: 'mailSentDate', reasonField: 'mailReason' },
+  { key: 'courier', label: 'Courier', offsetDays: 4, dateField: 'courierSentDate', reasonField: 'courierReason' },
 ];
 
 export default function BillStatus() {
