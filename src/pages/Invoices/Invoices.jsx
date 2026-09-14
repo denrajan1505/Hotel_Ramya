@@ -38,6 +38,7 @@ export default function Invoices() {
   const [deleteDate, setDeleteDate] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowToDelete, setRowToDelete] = useState(null);
+  const [confirmDeletePortal, setConfirmDeletePortal] = useState(false);
 
   const filtered = useMemo(() => {
     let list;
@@ -70,6 +71,21 @@ export default function Invoices() {
       toast.success(`Deleted ${deletedCount} bill(s) for ${deleteDate}.`);
       setConfirmDelete(false);
       setDeleteDate('');
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Every bill categorised Portal, paid or not — "delete all portal bills"
+  // means the whole category, not just the working (unpaid) tab view.
+  const portalDeleteCandidates = useMemo(() => (invoices || []).filter((inv) => inv.category === CATEGORIES.PORTAL), [invoices]);
+
+  const deletePortalMutation = useMutation({
+    mutationFn: () => deleteInvoicesBulk(portalDeleteCandidates, user),
+    onSuccess: ({ deletedCount }) => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      invalidateDashboard(queryClient);
+      toast.success(`Deleted ${deletedCount} Portal bill(s).`);
+      setConfirmDeletePortal(false);
     },
     onError: (err) => toast.error(err.message),
   });
@@ -126,9 +142,32 @@ export default function Invoices() {
                 {deleteCandidates.length} bill(s) match {deleteDate}
               </span>
             )}
+            <button
+              type="button"
+              className="btn-danger !px-3 !py-1.5 text-xs"
+              disabled={portalDeleteCandidates.length === 0}
+              onClick={() => setConfirmDeletePortal(true)}
+            >
+              <Trash2 size={14} /> Delete All Portal Bills ({portalDeleteCandidates.length})
+            </button>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmDeletePortal}
+        onClose={() => setConfirmDeletePortal(false)}
+        onConfirm={() => deletePortalMutation.mutate()}
+        title="Delete All Portal Bills"
+        danger
+        confirmLabel="Delete Permanently"
+        loading={deletePortalMutation.isPending}
+        message={`This will permanently delete ${portalDeleteCandidates.length} bill(s) categorised Portal (Booking.com, Agoda, Goibibo, MakeMyTrip, Expedia, EaseMyTrip, etc.) and adjust any affected customers' outstanding balances. Bills in every other category (Company, Individual, Travel, Unclassified) are not touched. This cannot be undone.${
+          portalDeleteCandidates.some((inv) => inv.paymentType)
+            ? ` Note: ${portalDeleteCandidates.filter((inv) => inv.paymentType).length} of these already have a recorded payment — deleting them will not remove their Journal Ledger voucher entry.`
+            : ''
+        }`}
+      />
 
       <ConfirmDialog
         open={confirmDelete}
