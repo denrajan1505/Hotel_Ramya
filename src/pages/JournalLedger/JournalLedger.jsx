@@ -1,11 +1,49 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Printer } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { Printer, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
-import { listJournalLedger } from '../../services/invoicePaymentService';
+import { listJournalLedger, setJournalVerified } from '../../services/invoicePaymentService';
+import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime, localDateKey } from '../../utils/formatters';
 import { exportTableToPdf } from '../../utils/pdfExport';
+
+// A verified journal has been checked against the bank statement/UTR by
+// Accounts — purely a manual sign-off flag, doesn't affect any ledger math.
+function VerifyToggle({ row, canVerify, mutation }) {
+  const busy = mutation.isPending && mutation.variables?.id === row.id;
+  const icon = row.verified ? (
+    <ShieldCheck size={18} className="text-emerald-500" />
+  ) : (
+    <ShieldQuestion size={18} className="text-slate-400" />
+  );
+
+  if (!canVerify) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs" title={row.verified ? `Verified by ${row.verifiedByName || 'Unknown'}` : 'Not verified'}>
+        {icon}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => mutation.mutate({ id: row.id, verified: !row.verified })}
+      className="inline-flex items-center gap-1.5 text-xs disabled:opacity-50"
+      title={
+        row.verified
+          ? `Verified by ${row.verifiedByName || 'Unknown'}${row.verifiedAt ? ` on ${formatDateTime(row.verifiedAt)}` : ''} — click to unverify`
+          : 'Not verified — click to mark verified'
+      }
+    >
+      {icon}
+      <span className={row.verified ? 'text-emerald-600' : 'text-slate-400'}>{row.verified ? 'Verified' : 'Unverified'}</span>
+    </button>
+  );
+}
 
 // Vouchers written before credit lines were introduced only carried fixed
 // totalAmount/totalTds/totalTcs/totalCommission fields (all Cr Bank/NEFT and
@@ -55,7 +93,19 @@ function legacyBills(entry) {
 // alongside the Cr line instead. Entries from before `createdAt` existed
 // fall back to the bank date since there's nothing else to show.
 export default function JournalLedger() {
+  const { user, can } = useAuth();
+  const canVerify = can('VERIFY_PAYMENTS');
+  const queryClient = useQueryClient();
   const { data: entries, isLoading } = useQuery({ queryKey: ['journal-ledger'], queryFn: listJournalLedger });
+
+  const verifyMutation = useMutation({
+    mutationFn: ({ id, verified }) => setJournalVerified(id, verified, user),
+    onSuccess: (_data, { verified }) => {
+      queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
+      toast.success(verified ? 'Journal entry marked verified.' : 'Journal entry marked unverified.');
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const rows = useMemo(() => {
     return (entries || []).map((entry) => {
@@ -103,6 +153,9 @@ export default function JournalLedger() {
         dr: totalDebit,
         cr: totalDebit,
         createdByName: entry.createdByName,
+        verified: Boolean(entry.verified),
+        verifiedByName: entry.verifiedByName,
+        verifiedAt: entry.verifiedAt,
       };
     });
   }, [entries]);
@@ -220,6 +273,12 @@ export default function JournalLedger() {
           { key: 'dr', header: 'Dr', align: 'right', render: (r) => formatCurrency(r.dr) },
           { key: 'cr', header: 'Cr', align: 'right', render: (r) => formatCurrency(r.cr) },
           { key: 'createdByName', header: 'Recorded By' },
+          {
+            key: 'verified',
+            header: 'Verified',
+            sortable: false,
+            render: (r) => <VerifyToggle row={r} canVerify={canVerify} mutation={verifyMutation} />,
+          },
         ]}
       />
     </div>

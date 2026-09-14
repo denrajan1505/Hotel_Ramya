@@ -4,6 +4,9 @@ import { COLLECTIONS } from '../constants/collections';
 import { SETTLEMENT_ACCOUNTS } from '../constants/categories';
 import { calculateOutstanding, deriveInvoiceStatus } from '../utils/balanceCalculations';
 import { logAudit } from './auditService';
+import { crudFor } from './firestoreCrud';
+
+const journalLedger = crudFor(COLLECTIONS.JOURNAL_LEDGER);
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const ACCOUNTS_BY_KEY = new Map(SETTLEMENT_ACCOUNTS.map((a) => [a.key, a]));
@@ -361,4 +364,19 @@ export async function reverseInvoicePayment({ invoice, user }) {
 export async function listJournalLedger() {
   const snap = await getDocs(query(collection(db, COLLECTIONS.JOURNAL_LEDGER), orderBy('createdAt', 'desc')));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function setJournalVerified(id, verified, user) {
+  await journalLedger.update(id, {
+    verified,
+    verifiedAt: verified ? serverTimestamp() : null,
+    verifiedByName: verified ? user?.displayName || user?.username || 'Unknown' : null,
+  });
+  await logAudit({
+    user,
+    action: verified ? 'Journal Entry Verified' : 'Journal Entry Unverified',
+    module: 'Journal Ledger',
+    oldValue: { verified: !verified },
+    newValue: { verified },
+  });
 }
