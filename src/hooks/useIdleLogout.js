@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 
-const IDLE_LIMIT_MS = 20 * 60 * 1000; // 20 minutes
+const IDLE_LIMIT_MS = 8 * 60 * 60 * 1000; // 8 hours
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'scroll', 'touchstart'];
 
 export function useIdleLogout(isAuthenticated, onIdle) {
