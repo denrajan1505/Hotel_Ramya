@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { Printer, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
@@ -92,6 +93,14 @@ function legacyBills(entry) {
 // bank/NEFT date (from the payment date entered when settling) is shown
 // alongside the Cr line instead. Entries from before `createdAt` existed
 // fall back to the bank date since there's nothing else to show.
+// Like bills moving to the Paid tab once settled, a voucher moves out of the
+// working Pending tab into Verified once Accounts signs it off, so Pending
+// only ever shows what still needs checking.
+const TABS = [
+  { key: 'PENDING', label: 'Pending Verification' },
+  { key: 'VERIFIED', label: 'Verified' },
+];
+
 export default function JournalLedger() {
   const { user, can } = useAuth();
   const canVerify = can('VERIFY_PAYMENTS');
@@ -164,9 +173,15 @@ export default function JournalLedger() {
   const setFilter = (key) => (e) => setFilters((prev) => ({ ...prev, [key]: e.target.value }));
   const clearFilters = () => setFilters({ from: '', to: '', billNo: '', company: '', minAmount: '', maxAmount: '' });
   const hasActiveFilters = Object.values(filters).some(Boolean);
+  const [activeTab, setActiveTab] = useState('PENDING');
+  const tabCounts = useMemo(
+    () => ({ PENDING: rows.filter((r) => !r.verified).length, VERIFIED: rows.filter((r) => r.verified).length }),
+    [rows],
+  );
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
+      if (r.verified !== (activeTab === 'VERIFIED')) return false;
       const dateKey = localDateKey(r.workingDate);
       if (filters.from && (!dateKey || dateKey < filters.from)) return false;
       if (filters.to && (!dateKey || dateKey > filters.to)) return false;
@@ -176,7 +191,7 @@ export default function JournalLedger() {
       if (filters.maxAmount && !(r.dr <= Number(filters.maxAmount))) return false;
       return true;
     });
-  }, [rows, filters]);
+  }, [rows, filters, activeTab]);
 
   const [reportDate, setReportDate] = useState(() => localDateKey(new Date()));
 
@@ -210,6 +225,21 @@ export default function JournalLedger() {
         title="Journal Ledger"
         subtitle="Settlement vouchers for cleared bills — Date is the working date; the bank/NEFT date is shown next to the Cr line"
       />
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={clsx(
+              'rounded-xl px-4 py-2 text-sm font-medium transition-colors',
+              activeTab === tab.key ? 'bg-primary-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-primary-900/60 dark:text-slate-300 dark:hover:bg-white/10',
+            )}
+          >
+            {tab.label} ({tabCounts[tab.key]})
+          </button>
+        ))}
+      </div>
 
       <div className="glass-card mb-4 flex flex-wrap items-end gap-3 p-4">
         <div>
@@ -262,8 +292,12 @@ export default function JournalLedger() {
       <DataTable
         loading={isLoading}
         rows={filteredRows}
-        emptyLabel="No journal entries yet — these are created automatically whenever a bill is settled."
-        exportFilename="journal-ledger"
+        exportFilename={activeTab === 'VERIFIED' ? 'journal-ledger-verified' : 'journal-ledger-pending'}
+        emptyLabel={
+          activeTab === 'VERIFIED'
+            ? 'No verified journal entries yet — entries move here once marked verified.'
+            : 'No journal entries pending verification.'
+        }
         columns={[
           { key: 'workingDate', header: 'Date', render: (r) => formatDate(r.workingDate) },
           { key: 'particulars', header: 'Particulars', render: (r) => <span className="whitespace-pre-line">{r.particulars}</span> },
@@ -273,6 +307,12 @@ export default function JournalLedger() {
           { key: 'dr', header: 'Dr', align: 'right', render: (r) => formatCurrency(r.dr) },
           { key: 'cr', header: 'Cr', align: 'right', render: (r) => formatCurrency(r.cr) },
           { key: 'createdByName', header: 'Recorded By' },
+          ...(activeTab === 'VERIFIED'
+            ? [
+                { key: 'verifiedByName', header: 'Verified By', render: (r) => r.verifiedByName || '—' },
+                { key: 'verifiedAt', header: 'Verified On', render: (r) => (r.verifiedAt ? formatDateTime(r.verifiedAt) : '—') },
+              ]
+            : []),
           {
             key: 'verified',
             header: 'Verified',
