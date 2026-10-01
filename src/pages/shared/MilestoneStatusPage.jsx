@@ -6,6 +6,7 @@ import DataTable from '../../components/common/DataTable';
 import StatusBadge from '../../components/common/StatusBadge';
 import { listInvoices, updateInvoice } from '../../services/invoiceService';
 import { useAuth } from '../../context/AuthContext';
+import { refreshInvoiceInCache } from '../../utils/invoiceCache';
 import { formatDate, localDateKey, addDays, daysBetween } from '../../utils/formatters';
 
 export function deliveryStatus(scheduledDate, actualDate) {
@@ -31,7 +32,7 @@ export function MilestoneUpdateCell({ invoice, user, canEdit, scheduledDate, dat
   const mutation = useMutation({
     mutationFn: () => updateInvoice(invoice.id, { [dateField]: actualDate, [reasonField]: reasonInput.trim() }, user),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       toast.success(`${label} updated for ${invoice.billNumber}.`);
     },
     onError: (err) => toast.error(err.message),

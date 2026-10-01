@@ -8,6 +8,7 @@ import StatusBadge from '../../components/common/StatusBadge';
 import { listInvoices, updateApprovalStatus } from '../../services/invoiceService';
 import { APPROVAL_STATUS_OPTIONS, APPROVAL_STATUS_CATEGORIES, APPROVAL_STATUS } from '../../constants/categories';
 import { useAuth } from '../../context/AuthContext';
+import { refreshInvoiceInCache } from '../../utils/invoiceCache';
 import { formatDate, formatDateTime } from '../../utils/formatters';
 
 const TYPE_TABS = [{ key: 'ALL', label: 'All Types', value: null }, ...APPROVAL_STATUS_CATEGORIES.map((c) => ({ key: c, label: c, value: c }))];
@@ -28,8 +29,8 @@ export default function BillApprovalStatus() {
 
   const statusMutation = useMutation({
     mutationFn: ({ id, approvalStatus }) => updateApprovalStatus(id, approvalStatus, user),
-    onSuccess: (_data, { billNumber, approvalStatus }) => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    onSuccess: (_data, { id, billNumber, approvalStatus }) => {
+      refreshInvoiceInCache(queryClient, id);
       toast.success(`${billNumber} marked ${approvalStatus}.`);
     },
     onError: (err) => toast.error(err.message),

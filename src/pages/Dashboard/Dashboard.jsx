@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import { Wallet, Banknote, Users, CreditCard, FileClock, AlertTriangle } from 'lucide-react';
@@ -8,15 +9,18 @@ import Loader from '../../components/common/Loader';
 import '../../components/charts/chartSetup';
 import { CHART_COLORS, CATEGORY_COLOR_MAP } from '../../components/charts/chartSetup';
 import {
-  fetchSummaryCards,
+  fetchTodaysPayments,
+  computeSummaryCards,
   fetchMonthlyCollections,
-  fetchOutstandingTrend,
-  fetchDepartmentWiseCredit,
+  computeOutstandingTrend,
+  computeDepartmentWiseCredit,
   fetchRecentPayments,
   fetchUpcomingDuePayments,
   fetchTopOutstandingCustomers,
 } from '../../services/dashboardService';
 import { fetchRecentAuditLogs } from '../../services/auditService';
+import { listInvoices } from '../../services/invoiceService';
+import { listCustomers, listCreditAccounts } from '../../services/customerService';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
 
@@ -27,10 +31,30 @@ function useCard(key, fn, options = {}) {
 export default function Dashboard() {
   const { can } = useAuth();
   const canViewAuditLogs = can('VIEW_AUDIT_LOGS');
-  const summary = useCard('dashboard-summary', fetchSummaryCards);
+  // Shared with the list pages' caches — see dashboardService for why.
+  const invoicesQ = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });
+  const creditAccountsQ = useQuery({ queryKey: ['credit-accounts'], queryFn: listCreditAccounts });
+  const customersQ = useQuery({ queryKey: ['customers'], queryFn: listCustomers });
+  const todaysPayments = useCard('dashboard-todays-payments', fetchTodaysPayments);
+
+  const summary = useMemo(() => {
+    const ready = invoicesQ.data && creditAccountsQ.data && customersQ.data && todaysPayments.data;
+    return {
+      isLoading: !ready,
+      data: ready
+        ? computeSummaryCards({ invoices: invoicesQ.data, creditAccounts: creditAccountsQ.data, customers: customersQ.data, todaysPayments: todaysPayments.data })
+        : undefined,
+    };
+  }, [invoicesQ.data, creditAccountsQ.data, customersQ.data, todaysPayments.data]);
   const monthly = useCard('dashboard-monthly', () => fetchMonthlyCollections(6));
-  const trend = useCard('dashboard-trend', () => fetchOutstandingTrend(6));
-  const deptCredit = useCard('dashboard-dept-credit', fetchDepartmentWiseCredit);
+  const trend = useMemo(
+    () => ({ isLoading: !invoicesQ.data, data: invoicesQ.data ? computeOutstandingTrend(invoicesQ.data, 6) : undefined }),
+    [invoicesQ.data],
+  );
+  const deptCredit = useMemo(() => {
+    const ready = invoicesQ.data && creditAccountsQ.data;
+    return { isLoading: !ready, data: ready ? computeDepartmentWiseCredit(invoicesQ.data, creditAccountsQ.data) : undefined };
+  }, [invoicesQ.data, creditAccountsQ.data]);
   const recentPayments = useCard('dashboard-recent-payments', () => fetchRecentPayments(8));
   const upcomingDue = useCard('dashboard-upcoming-due', () => fetchUpcomingDuePayments(8));
   const topOutstanding = useCard('dashboard-top-outstanding', () => fetchTopOutstandingCustomers(8));

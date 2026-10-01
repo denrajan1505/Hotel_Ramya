@@ -16,6 +16,7 @@ import { CATEGORIES, CATEGORY_TABS, SETTLEMENT_ACCOUNTS, INVOICE_STATUS } from '
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, localDateKey } from '../../utils/formatters';
 import { invalidateDashboard } from '../../utils/dashboardQueries';
+import { refreshInvoiceInCache, removeInvoicesFromCache } from '../../utils/invoiceCache';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -66,7 +67,7 @@ export default function Invoices() {
   const deleteMutation = useMutation({
     mutationFn: () => deleteInvoicesBulk(deleteCandidates, user),
     onSuccess: ({ deletedCount }) => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      removeInvoicesFromCache(queryClient, deleteCandidates.map((inv) => inv.id));
       invalidateDashboard(queryClient);
       toast.success(`Deleted ${deletedCount} bill(s) for ${deleteDate}.`);
       setConfirmDelete(false);
@@ -82,7 +83,7 @@ export default function Invoices() {
   const deletePortalMutation = useMutation({
     mutationFn: () => deleteInvoicesBulk(portalDeleteCandidates, user),
     onSuccess: ({ deletedCount }) => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      removeInvoicesFromCache(queryClient, portalDeleteCandidates.map((inv) => inv.id));
       invalidateDashboard(queryClient);
       toast.success(`Deleted ${deletedCount} Portal bill(s).`);
       setConfirmDeletePortal(false);
@@ -93,7 +94,7 @@ export default function Invoices() {
   const rowDeleteMutation = useMutation({
     mutationFn: () => deleteInvoice(rowToDelete.id, user),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      removeInvoicesFromCache(queryClient, [rowToDelete.id]);
       invalidateDashboard(queryClient);
       toast.success(`Bill ${rowToDelete.billNumber} deleted.`);
       setRowToDelete(null);
@@ -280,7 +281,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   const categoryMutation = useMutation({
     mutationFn: () => setInvoiceCategory(invoice.id, category, user),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       invalidateDashboard(queryClient);
       toast.success('Bill categorised.');
       onClose();
@@ -294,7 +295,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   const businessDateMutation = useMutation({
     mutationFn: () => updateInvoice(invoice.id, { businessDate: new Date(`${businessDateInput}T00:00:00`) }, user),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       invalidateDashboard(queryClient);
       toast.success('Bill date updated.');
     },
@@ -306,7 +307,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   const referenceMutation = useMutation({
     mutationFn: () => updateInvoice(invoice.id, { referenceName: referenceInput.trim() }, user),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       toast.success('Reference updated.');
     },
     onError: (err) => toast.error(err.message),
@@ -316,7 +317,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   const reverseMutation = useMutation({
     mutationFn: () => reverseInvoicePayment({ invoice, user }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
       invalidateDashboard(queryClient);
       toast.success(`Payment reversed — ${invoice.billNumber} is Unpaid again.`);
@@ -349,7 +350,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         user,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
       invalidateDashboard(queryClient);
       toast.success('Payment recorded — balance settled.');
@@ -361,7 +362,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   const utrMutation = useMutation({
     mutationFn: () => updateInvoiceUtr({ invoice, utrNumber: utrEdit, user }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      refreshInvoiceInCache(queryClient, invoice.id);
       queryClient.invalidateQueries({ queryKey: ['journal-ledger'] });
       toast.success('UTR saved — journal entry created.');
     },

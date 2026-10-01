@@ -7,52 +7,47 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const invoicesCol = collection(db, COLLECTIONS.INVOICES);
 const paymentsCol = collection(db, COLLECTIONS.PAYMENTS);
-const customersCol = collection(db, COLLECTIONS.CUSTOMER_MASTER);
 const creditAccountsCol = collection(db, COLLECTIONS.CREDIT_ACCOUNTS);
 
 /**
- * Summed/counted client-side from plain getDocs reads, same as every other
- * query in this file — Firestore's server-side aggregation API
- * (getAggregateFromServer/getCountFromServer) was tried here first but a
- * single failed call in its Promise.all silently blanked every summary card
- * with no visible error. This trades a bit of read volume (fine at this
- * hotel's invoice scale) for cards that reliably show real numbers.
+ * The invoice-, credit-account- and customer-based widgets are computed from
+ * the same ['invoices'] / ['credit-accounts'] / ['customers'] query caches
+ * the list pages already hold, instead of each widget re-reading those whole
+ * collections. On the Spark plan every returned doc is a billed read (50k/day),
+ * and the dashboard used to read all invoices twice per visit on its own.
+ * Only today's payments still need their own (small, date-bounded) query.
  */
-export async function fetchSummaryCards() {
+export async function fetchTodaysPayments() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
+  const snap = await getDocs(query(paymentsCol, where('createdAt', '>=', startOfToday)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
 
-  const [invoicesSnap, customersSnap, creditAccountsSnap, todaysPaymentsSnap] = await Promise.all([
-    getDocs(invoicesCol),
-    getDocs(customersCol),
-    getDocs(creditAccountsCol),
-    getDocs(query(paymentsCol, where('createdAt', '>=', startOfToday))),
-  ]);
-
+export function computeSummaryCards({ invoices, creditAccounts, customers, todaysPayments }) {
   let totalOutstanding = 0;
   let pendingInvoices = 0;
   let overdueCustomers = 0;
-  invoicesSnap.docs.forEach((d) => {
-    const inv = d.data();
+  invoices.forEach((inv) => {
     totalOutstanding += Number(inv.outstanding) || 0;
     if (inv.status === 'Unpaid' || inv.status === 'Partially Paid') pendingInvoices += 1;
     if (inv.status === 'Overdue') overdueCustomers += 1;
   });
 
   let totalCreditLimit = 0;
-  creditAccountsSnap.docs.forEach((d) => {
-    totalCreditLimit += Number(d.data().creditLimit) || 0;
+  creditAccounts.forEach((acc) => {
+    totalCreditLimit += Number(acc.creditLimit) || 0;
   });
 
   let todaysCollections = 0;
-  todaysPaymentsSnap.docs.forEach((d) => {
-    todaysCollections += Number(d.data().receivedAmount) || 0;
+  todaysPayments.forEach((p) => {
+    todaysCollections += Number(p.receivedAmount) || 0;
   });
 
   return {
     totalOutstanding: round2(totalOutstanding),
     todaysCollections: round2(todaysCollections),
-    totalCustomers: customersSnap.size,
+    totalCustomers: customers.length,
     totalCreditLimit: round2(totalCreditLimit),
     pendingInvoices,
     overdueCustomers,
@@ -76,35 +71,31 @@ export async function fetchMonthlyCollections(monthsBack = 6) {
   return [...buckets.entries()].map(([month, total]) => ({ month, total }));
 }
 
-export async function fetchOutstandingTrend(monthsBack = 6) {
+export function computeOutstandingTrend(invoices, monthsBack = 6) {
   const since = new Date();
   since.setMonth(since.getMonth() - monthsBack);
   since.setDate(1);
   since.setHours(0, 0, 0, 0);
 
-  const snap = await getDocs(query(invoicesCol, where('businessDate', '>=', since), orderBy('businessDate', 'asc')));
   const buckets = new Map();
-  snap.docs.forEach((d) => {
-    const inv = d.data();
+  invoices.forEach((inv) => {
     const date = toDate(inv.businessDate);
-    if (!date) return;
+    if (!date || date < since) return;
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     buckets.set(key, (buckets.get(key) || 0) + (Number(inv.outstanding) || 0));
   });
-  return [...buckets.entries()].map(([month, total]) => ({ month, total }));
+  return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, total]) => ({ month, total }));
 }
 
-export async function fetchDepartmentWiseCredit() {
-  const snap = await getDocs(creditAccountsCol);
-  const invSnap = await getDocs(invoicesCol);
+export function computeDepartmentWiseCredit(invoices, creditAccounts) {
   const categoryByCustomerId = new Map();
-  invSnap.docs.forEach((d) => {
-    const inv = d.data();
+  // Oldest first so the newest bill's category wins, matching the old
+  // unordered-scan behaviour as closely as a deterministic order allows.
+  [...invoices].reverse().forEach((inv) => {
     if (inv.customerId) categoryByCustomerId.set(inv.customerId, inv.category);
   });
   const buckets = new Map();
-  snap.docs.forEach((d) => {
-    const acc = d.data();
+  creditAccounts.forEach((acc) => {
     const category = categoryByCustomerId.get(acc.customerId) || 'Unclassified';
     buckets.set(category, (buckets.get(category) || 0) + (Number(acc.creditLimit) || 0));
   });

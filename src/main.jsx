@@ -20,7 +20,14 @@ const queryClient = new QueryClient({
   }),
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      // Every list page reads whole collections and every returned doc is a
+      // billed Firestore read (Spark plan: 50k/day). A 30s staleTime meant
+      // just hopping between Invoices / milestone pages / Dashboard re-read
+      // every bill each time and exhausted the quota by morning. Our own edits
+      // patch or invalidate the cache explicitly, so a longer window only
+      // delays seeing *other* users' changes (a page reload still refreshes).
+      staleTime: 5 * 60_000,
+      gcTime: 30 * 60_000,
       refetchOnWindowFocus: false,
       retry: 1,
     },
