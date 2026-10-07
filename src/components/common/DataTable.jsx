@@ -71,7 +71,7 @@ export default function DataTable({
 
   return (
     <div className="table-shell">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4 dark:border-white/10">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-white/10">
         {searchable ? (
           <div className="relative w-full max-w-xs">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -112,7 +112,7 @@ export default function DataTable({
                   key={col.key}
                   onClick={() => col.sortable !== false && toggleSort(col.key)}
                   className={clsx(
-                    'select-none whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400',
+                    'select-none whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400',
                     col.sortable !== false && 'cursor-pointer hover:text-primary-600 dark:hover:text-primary-300',
                     col.align === 'right' && 'text-right',
                   )}
@@ -154,7 +154,7 @@ export default function DataTable({
                   )}
                 >
                   {columns.map((col) => (
-                    <td key={col.key} className={clsx('whitespace-nowrap px-4 py-3 text-slate-700 dark:text-slate-200', col.align === 'right' && 'text-right')}>
+                    <td key={col.key} className={clsx('whitespace-nowrap px-3 py-1.5 text-slate-700 dark:text-slate-200', col.align === 'right' && 'text-right')}>
                       {col.render ? col.render(row) : row[col.key]}
                     </td>
                   ))}
@@ -165,7 +165,7 @@ export default function DataTable({
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Rows per page</span>
           <select

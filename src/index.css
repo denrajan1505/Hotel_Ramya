@@ -48,6 +48,13 @@
   html {
     -webkit-font-smoothing: antialiased;
   }
+  /* Compact density on desktop: every rem-based size (text, padding, gaps)
+     scales down together. Phones keep 16px so iOS doesn't zoom on inputs. */
+  @media (min-width: 768px) {
+    html {
+      font-size: 87.5%;
+    }
+  }
   body {
     @apply bg-slate-50 text-slate-800 dark:bg-primary-950 dark:text-slate-100;
     font-feature-settings: "tnum" 1, "cv02" 1;
@@ -68,7 +75,7 @@
   .btn-gold,
   .btn-outline,
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium
       transition-all duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
@@ -87,12 +94,12 @@
     @apply bg-danger-500 text-white hover:bg-danger-600 focus:outline-none focus:ring-2 focus:ring-danger-500/40;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm
+    @apply w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800 shadow-sm
       transition focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-400/30
       dark:border-white/15 dark:bg-primary-900/50 dark:text-slate-100 dark:placeholder:text-slate-500;
   }
   .label {
-    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400;
+    @apply mb-0.5 block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400;
   }
   .badge {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;

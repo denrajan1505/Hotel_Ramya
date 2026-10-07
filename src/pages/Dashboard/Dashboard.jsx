@@ -117,22 +117,22 @@ export default function Dashboard() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="glass-card p-5 xl:col-span-2">
+        <div className="glass-card p-4 xl:col-span-2">
           <h3 className="mb-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Monthly Collections</h3>
           {monthly.isLoading ? <Loader /> : <Line data={lineData} options={{ responsive: true, plugins: { legend: { display: false } } }} />}
         </div>
-        <div className="glass-card p-5">
+        <div className="glass-card p-4">
           <h3 className="mb-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Department-wise Credit</h3>
           {deptCredit.isLoading ? <Loader /> : <Doughnut data={deptData} options={{ plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } }} />}
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="glass-card p-5 xl:col-span-2">
+        <div className="glass-card p-4 xl:col-span-2">
           <h3 className="mb-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Outstanding Trend</h3>
           {trend.isLoading ? <Loader /> : <Bar data={trendData} options={{ responsive: true, plugins: { legend: { display: false } } }} />}
         </div>
-        <div className="glass-card p-5">
+        <div className="glass-card p-4">
           <h3 className="mb-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Recent Activity</h3>
           {!canViewAuditLogs ? (
             <p className="text-sm text-slate-400">Only Administrators can view audit activity.</p>

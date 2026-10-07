@@ -39,7 +39,7 @@ export default function Reports() {
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {REPORT_LINKS.map(({ to, label, icon: Icon, desc }) => (
-          <Link key={to} to={to} className="glass-card group flex items-start gap-3 p-5 transition-transform hover:-translate-y-0.5">
+          <Link key={to} to={to} className="glass-card group flex items-start gap-3 p-4 transition-transform hover:-translate-y-0.5">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-300">
               <Icon size={18} />
             </div>

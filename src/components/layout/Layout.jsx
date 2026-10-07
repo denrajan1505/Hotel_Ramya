@@ -23,7 +23,7 @@ export default function Layout() {
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
       <div className="flex min-w-0 flex-1 flex-col">
         <Header onMenuClick={() => setSidebarOpen((o) => !o)} />
-        <main className="app-scrollbar flex-1 overflow-y-auto p-4 md:p-6">
+        <main className="app-scrollbar flex-1 overflow-y-auto p-3 md:p-4">
           <Outlet />
         </main>
       </div>

@@ -148,7 +148,7 @@ export default function ImportFOCashier() {
       {parsed && !parsing && (
         <div className="mt-6 space-y-4">
           {!parsed.validation.valid ? (
-            <div className="glass-card flex items-start gap-3 border border-danger-200 p-5 dark:border-danger-500/30">
+            <div className="glass-card flex items-start gap-3 border border-danger-200 p-4 dark:border-danger-500/30">
               <XCircle className="mt-0.5 shrink-0 text-danger-500" size={20} />
               <div>
                 <p className="font-semibold text-danger-600">Missing mandatory columns</p>

@@ -372,8 +372,8 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
   if (!invoice) return null;
 
   return (
-    <Modal open={Boolean(invoice)} onClose={onClose} title={`Invoice ${invoice.billNumber}`} size="lg">
-      <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
+    <Modal open={Boolean(invoice)} onClose={onClose} title={`Invoice ${invoice.billNumber}`} size="xl">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
         <Field label="Bill Date" value={formatDate(invoice.businessDate)} />
         <Field label="Guest Name" value={invoice.guestName} />
         <Field label="Company (from bill)" value={invoice.companyName || '—'} />
@@ -383,10 +383,11 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         <Field label="Department" value={invoice.department} />
         <Field label="Reference" value={invoice.referenceName || '—'} />
         <Field label="Status" value={<StatusBadge value={invoice.status} />} />
+        <Field label="Category" value={<StatusBadge value={invoice.category || CATEGORIES.UNCLASSIFIED} />} />
       </div>
 
       {canManageCategory && (
-        <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+        <div className="mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-2.5 dark:bg-white/5">
           <div>
             <label className="label">Bill Date</label>
             <input type="date" className="input !w-auto" value={businessDateInput} onChange={(e) => setBusinessDateInput(e.target.value)} />
@@ -399,7 +400,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
             Save Bill Date
           </button>
 
-          <div className="ml-auto min-w-[14rem]">
+          <div className="min-w-[12rem]">
             <label className="label">Reference</label>
             <input
               list="reference-person-options"
@@ -421,38 +422,27 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
           >
             Save Reference
           </button>
+          <div className="min-w-[10rem]">
+            <label className="label">Category</label>
+            <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value={CATEGORIES.UNCLASSIFIED}>Unclassified</option>
+              <option value={CATEGORIES.COMPANY}>Company</option>
+              <option value={CATEGORIES.INDIVIDUAL}>Individual</option>
+              <option value={CATEGORIES.PORTAL}>Portal</option>
+              <option value={CATEGORIES.TRAVEL}>Travel</option>
+            </select>
+          </div>
+          <button
+            className="btn-primary !px-3 !py-1.5 text-xs"
+            disabled={categoryMutation.isPending || category === (invoice.category || CATEGORIES.UNCLASSIFIED)}
+            onClick={() => categoryMutation.mutate()}
+          >
+            Save Category
+          </button>
         </div>
       )}
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Category</h4>
-      <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Field label="Current Category" value={<StatusBadge value={invoice.category || CATEGORIES.UNCLASSIFIED} />} />
-        </div>
-        {canManageCategory && (
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <div className="min-w-[16rem]">
-              <label className="label">Category</label>
-              <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option value={CATEGORIES.UNCLASSIFIED}>Unclassified</option>
-                <option value={CATEGORIES.COMPANY}>Company</option>
-                <option value={CATEGORIES.INDIVIDUAL}>Individual</option>
-                <option value={CATEGORIES.PORTAL}>Portal</option>
-                <option value={CATEGORIES.TRAVEL}>Travel</option>
-              </select>
-            </div>
-            <button
-              className="btn-primary !px-3 !py-1.5 text-xs"
-              disabled={categoryMutation.isPending || category === (invoice.category || CATEGORIES.UNCLASSIFIED)}
-              onClick={() => categoryMutation.mutate()}
-            >
-              Save Category
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-sm dark:bg-white/5 sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-slate-50 p-2.5 text-sm dark:bg-white/5 sm:grid-cols-4 lg:grid-cols-8">
         <Money label="Bill Amount" value={invoice.billAmount} />
         <Money label="Advance" value={invoice.advance} />
         <Money label="Received" value={invoice.received} />
@@ -464,7 +454,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
       </div>
 
       {invoice.paymentType && canReverse && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-200 bg-danger-50/50 p-4 dark:border-danger-500/30 dark:bg-danger-500/10">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-danger-200 bg-danger-50/50 p-2.5 dark:border-danger-500/30 dark:bg-danger-500/10">
           <p className="text-xs text-slate-600 dark:text-slate-300">
             This bill has a recorded settlement ({invoice.paymentType}, {formatDate(invoice.paymentDate)}, {formatCurrency(invoice.paymentAmount)}
             {invoice.utrNumber ? `, UTR ${invoice.utrNumber}` : ''}). Reverting removes it from the Journal Ledger, restores the outstanding
@@ -489,12 +479,12 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
         )}), restore its outstanding balance, remove it from its Journal Ledger voucher, and reverse the customer's credit account by the same amount. The bill amount and bill date are not changed. No other bill is affected.`}
       />
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment</h4>
+      <h4 className="mb-1 mt-3 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment</h4>
       {invoice.outstanding > 0 ? (
         canRecordPayment ? (
-          <div className="rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+          <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-white/5">
             <label className="label">Credit Lines</label>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {lines.map((line, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-2">
                   <select
@@ -539,7 +529,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
               + Add Line
             </button>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
                 <label className="label">Payment Date</label>
                 <input type="date" className="input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
@@ -566,7 +556,7 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
               </p>
             )}
             <button
-              className="btn-primary mt-3"
+              className="btn-primary mt-2"
               disabled={!paymentDate || !amountValid || settleMutation.isPending}
               onClick={() => settleMutation.mutate()}
             >
@@ -577,20 +567,20 @@ function InvoiceDetailModal({ invoice, onClose, canRecordPayment, canManageCateg
           <p className="text-sm text-slate-400">No payment recorded yet.</p>
         )
       ) : invoice.paymentType ? (
-        <div className="rounded-xl bg-slate-50 p-4 text-sm dark:bg-white/5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="rounded-lg bg-slate-50 p-2.5 text-sm dark:bg-white/5">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
             <Field label="Payment Type" value={invoice.paymentType} />
             <Field label="Payment Date" value={formatDate(invoice.paymentDate)} />
             <Field label="Amount Settled" value={formatCurrency(invoice.paymentAmount)} />
           </div>
           {invoice.creditLines?.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-4">
+            <div className="mt-2 flex flex-wrap gap-4">
               {invoice.creditLines.map((l, i) => (
                 <Field key={i} label={l.label} value={formatCurrency(l.amount)} />
               ))}
             </div>
           )}
-          <div className="mt-3">
+          <div className="mt-2">
             <label className="label">UTR Number</label>
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -643,7 +633,7 @@ function Field({ label, value }) {
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-0.5 text-slate-700 dark:text-slate-200">{value}</p>
+      <p className="text-slate-700 dark:text-slate-200">{value}</p>
     </div>
   );
 }
@@ -652,7 +642,7 @@ function Money({ label, value, highlight }) {
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={clsx('mt-0.5 font-semibold', highlight ? 'text-danger-600' : 'text-slate-700 dark:text-slate-200')}>{formatCurrency(value)}</p>
+      <p className={clsx('font-semibold', highlight ? 'text-danger-600' : 'text-slate-700 dark:text-slate-200')}>{formatCurrency(value)}</p>
     </div>
   );
 }

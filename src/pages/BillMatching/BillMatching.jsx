@@ -86,7 +86,7 @@ export default function BillMatching() {
       </div>
 
       {canMatch && (
-        <div className="table-shell mb-6 p-4">
+        <div className="table-shell mb-4 p-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-600 dark:text-slate-300">Match by Company</h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>

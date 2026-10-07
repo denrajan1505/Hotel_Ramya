@@ -110,7 +110,7 @@ function ReceiptDetailModal({ receiptId, onClose, canCancel, user, onCancelled }
         <Field label="Category" value={<StatusBadge value={receipt.customerCategory} />} />
       </div>
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment Details</h4>
+      <h4 className="mb-1 mt-3 text-sm font-semibold text-slate-600 dark:text-slate-300">Payment Details</h4>
       <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-sm dark:bg-white/5 sm:grid-cols-4">
         <Field label="Payment Mode" value={receipt.paymentMode} />
         <Field label="Bank Name" value={receipt.bankName || '—'} />
@@ -122,7 +122,7 @@ function ReceiptDetailModal({ receiptId, onClose, canCancel, user, onCancelled }
         {receipt.remarks && <Field label="Remarks" value={receipt.remarks} />}
       </div>
 
-      <h4 className="mb-2 mt-5 text-sm font-semibold text-slate-600 dark:text-slate-300">Against Bills</h4>
+      <h4 className="mb-1 mt-3 text-sm font-semibold text-slate-600 dark:text-slate-300">Against Bills</h4>
       <div className="table-shell">
         <table className="w-full text-left text-sm">
           <thead>

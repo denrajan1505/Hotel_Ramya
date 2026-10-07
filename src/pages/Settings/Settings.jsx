@@ -86,8 +86,8 @@ export default function Settings() {
     <div>
       <PageHeader title="Settings" subtitle="Hotel-wide configuration" />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="glass-card p-5">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="glass-card p-4">
           <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Billing Departments</h3>
           <p className="mb-4 text-xs text-slate-400">Front Office departments used on invoices imported from the FO Cashier Report.</p>
           <div className="mb-3 flex gap-2">
@@ -110,7 +110,7 @@ export default function Settings() {
         </div>
 
         {can('MANAGE_REFERENCE_PERSONS') && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-4">
             <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Reference Persons</h3>
             <p className="mb-4 text-xs text-slate-400">
               The people bills are attributed to alongside the customer name (e.g. "ABC Travels — Ref: Mr. Rajesh"). Deactivate one to hide it from
@@ -139,7 +139,7 @@ export default function Settings() {
         )}
 
         {can('MANAGE_CUSTOMERS') && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-4">
             <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Customer Master Quick-Start</h3>
             <p className="mb-4 text-xs text-slate-400">
               Seed well-known OTAs and travel agencies (Booking.com, Agoda, MakeMyTrip, SRS Travels, etc.) into the Customer Master so FO Cashier imports
@@ -152,7 +152,7 @@ export default function Settings() {
         )}
 
         {can('MANAGE_CREDIT_LIMITS') && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-4">
             <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Credit Account Reconciliation</h3>
             <p className="mb-4 text-xs text-slate-400">
               Credit account balances update automatically with every payment, receipt, adjustment and import. Use this to re-sum every customer's
@@ -165,7 +165,7 @@ export default function Settings() {
         )}
 
         {can('BACKUP_DATABASE') && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-4">
             <h3 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Database Backup</h3>
             <p className="mb-4 text-xs text-slate-400">Download a full JSON export of every collection for offline safekeeping.</p>
             <button onClick={handleBackup} disabled={busy} className="btn-outline">

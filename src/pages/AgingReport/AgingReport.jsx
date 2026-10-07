@@ -123,7 +123,7 @@ export default function AgingReport() {
         ))}
       </div>
 
-      <div className="glass-card mb-6 p-5">
+      <div className="glass-card mb-4 p-4">
         <Bar data={chartData} options={{ plugins: { legend: { display: false } } }} />
       </div>
 

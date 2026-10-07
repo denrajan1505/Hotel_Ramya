@@ -11,9 +11,9 @@ const TONE_STYLES = {
 
 export default function StatCard({ label, value, icon: Icon, tone = 'primary', trend, loading }) {
   return (
-    <div className="glass-card flex items-center gap-4 p-5">
-      <div className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm', TONE_STYLES[tone])}>
-        {Icon && <Icon size={22} strokeWidth={2} />}
+    <div className="glass-card flex items-center gap-3 p-3.5">
+      <div className={clsx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br shadow-sm', TONE_STYLES[tone])}>
+        {Icon && <Icon size={20} strokeWidth={2} />}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
