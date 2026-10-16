@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bar } from 'react-chartjs-2';
 import PageHeader from '../../components/common/PageHeader';
 import DataTable from '../../components/common/DataTable';
-import '../../components/charts/chartSetup';
 import { CHART_COLORS } from '../../components/charts/chartSetup';
 import { listInvoices } from '../../services/invoiceService';
 import { CATEGORY_TABS } from '../../constants/categories';
@@ -45,18 +43,6 @@ export default function AgingReport() {
     });
     return totals;
   }, [rows]);
-
-  const chartData = {
-    labels: BUCKETS,
-    datasets: [
-      {
-        label: 'Outstanding',
-        data: BUCKETS.map((b) => bucketTotals[b]),
-        backgroundColor: BUCKET_COLORS,
-        borderRadius: 6,
-      },
-    ],
-  };
 
   return (
     <div>
@@ -121,10 +107,6 @@ export default function AgingReport() {
             </p>
           </div>
         ))}
-      </div>
-
-      <div className="glass-card mb-4 p-4">
-        <Bar data={chartData} options={{ plugins: { legend: { display: false } } }} />
       </div>
 
       <DataTable

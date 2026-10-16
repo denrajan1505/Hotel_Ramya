@@ -11,6 +11,7 @@ export const COLLECTIONS = {
   RECEIPT_ALLOCATIONS: 'receiptAllocations',
   JOURNAL_LEDGER: 'journalLedger',
   ADJUSTMENTS: 'adjustments',
+  GUEST_AMOUNTS: 'guestAmounts',
   DEPARTMENTS: 'departments',
   REFERENCE_PERSONS: 'referencePersons',
   AUDIT_LOGS: 'auditLogs',

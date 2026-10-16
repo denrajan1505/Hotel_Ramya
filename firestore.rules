@@ -150,6 +150,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Guest Amount register — standalone excess-payment log, not tied to any
+    // invoice/credit-account math, so any operating role may record or update
+    // it; only Administrator may delete.
+    match /guestAmounts/{id} {
+      allow read: if canRead();
+      allow create, update: if canOperate();
+      allow delete: if isAdmin();
+    }
+
     match /departments/{id} {
       allow read: if canRead();
       allow write: if isAdmin();

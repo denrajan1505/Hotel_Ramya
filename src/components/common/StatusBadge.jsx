@@ -10,6 +10,8 @@ const STYLES = {
   Pending: 'bg-warning-50 text-warning-600 dark:bg-warning-500/10',
   Approved: 'bg-success-50 text-success-600 dark:bg-success-500/10',
   Rejected: 'bg-danger-50 text-danger-600 dark:bg-danger-500/10',
+  'Informed to Team': 'bg-primary-50 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300',
+  Resolved: 'bg-success-50 text-success-600 dark:bg-success-500/10',
   Unclassified: 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400',
   Company: 'bg-primary-50 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300',
   Individual: 'bg-gold-50 text-gold-700 dark:bg-gold-500/15 dark:text-gold-300',
