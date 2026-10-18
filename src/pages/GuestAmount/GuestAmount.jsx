@@ -54,6 +54,9 @@ const showDate = (key) => (key ? formatDate(`${key}T00:00:00`) : '—');
 
 const byDateDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || ''));
 
+// Total Guest Amount = Credit − Debit.
+const guestTotal = (e) => (Number(e.creditAmount) || 0) - (Number(e.debitAmount) || 0);
+
 export default function GuestAmount() {
   const { user, can } = useAuth();
   const canManage = can('MANAGE_GUEST_AMOUNTS');
@@ -168,14 +171,10 @@ export default function GuestAmount() {
       if (particulars && !String(e.particulars || '').toLowerCase().includes(particulars)) return false;
       if (description && !String(e.description || '').toLowerCase().includes(description)) return false;
       return true;
-    });
+    }).map((e) => ({ ...e, totalGuestAmount: guestTotal(e) }));
   }, [entries, filters, activeTab]);
 
-  const totals = useMemo(() => {
-    const debit = filteredRows.reduce((t, e) => t + (Number(e.debitAmount) || 0), 0);
-    const credit = filteredRows.reduce((t, e) => t + (Number(e.creditAmount) || 0), 0);
-    return { debit, credit, net: credit - debit };
-  }, [filteredRows]);
+  const totalGuestAmount = useMemo(() => filteredRows.reduce((t, e) => t + e.totalGuestAmount, 0), [filteredRows]);
 
   return (
     <div>
@@ -233,17 +232,9 @@ export default function GuestAmount() {
 
       <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="glass-card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-400">Total Debit</p>
-          <p className="mt-1 text-lg font-bold text-danger-600">{formatCurrency(totals.debit)}</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-400">Total Credit</p>
-          <p className="mt-1 text-lg font-bold text-success-600">{formatCurrency(totals.credit)}</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-xs font-semibold uppercase text-slate-400">Net (Credit − Debit)</p>
-          <p className={clsx('mt-1 text-lg font-bold', totals.net < 0 ? 'text-danger-600' : 'text-primary-700 dark:text-primary-300')}>
-            {formatCurrency(totals.net)}
+          <p className="text-xs font-semibold uppercase text-slate-400">Total Guest Amount (Credit − Debit)</p>
+          <p className={clsx('mt-1 text-lg font-bold', totalGuestAmount < 0 ? 'text-danger-600' : 'text-primary-700 dark:text-primary-300')}>
+            {formatCurrency(totalGuestAmount)}
           </p>
         </div>
       </div>
@@ -267,8 +258,12 @@ export default function GuestAmount() {
               </span>
             ),
           },
-          { key: 'debitAmount', header: 'Debit', align: 'right', render: (r) => (r.debitAmount ? formatCurrency(r.debitAmount) : '—') },
-          { key: 'creditAmount', header: 'Credit', align: 'right', render: (r) => (r.creditAmount ? formatCurrency(r.creditAmount) : '—') },
+          {
+            key: 'totalGuestAmount',
+            header: 'Total Guest Amount',
+            align: 'right',
+            render: (r) => <span className={clsx(r.totalGuestAmount < 0 && 'text-danger-600')}>{formatCurrency(r.totalGuestAmount)}</span>,
+          },
           {
             key: 'remarks',
             header: 'Remarks',
@@ -353,6 +348,10 @@ export default function GuestAmount() {
               {errors.creditAmount && <p className="mt-1 text-xs text-danger-600">{errors.creditAmount.message}</p>}
             </div>
           </div>
+          <p className="text-sm text-slate-500">
+            Total Guest Amount (Credit − Debit):{' '}
+            <span className="font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(guestTotal({ debitAmount: watch('debitAmount'), creditAmount: watch('creditAmount') }))}</span>
+          </p>
           <div>
             <label className="label">Remarks</label>
             <textarea className="input" rows={2} placeholder="Notes for the receiving team" {...register('remarks')} />
